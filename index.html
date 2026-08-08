@@ -520,48 +520,69 @@ const turnoverEmaSeries = chart.addLineSeries({
 // to build a true separate sub-panel with this library, since a single
 // canvas's price-axis labels always span its FULL height regardless of
 // scaleMargins - which is exactly what caused RSI's earlier bleed-into-
-// the-price-axis problem. Synced to the main chart's time scale below.
+// the-price-axis problem.
+//
+// Rather than reusing one instance across hide/show cycles (which risks
+// getting stuck if it's ever resized while its container is display:none),
+// this instance is fully destroyed and recreated fresh every time RSI is
+// toggled back on - see setRsiEnabled() below.
 const rsiChartEl = document.getElementById('rsi-chart');
-const rsiChart = LightweightCharts.createChart(rsiChartEl, {
-  layout: {
-    background: { color: '#ffffff' },
-    textColor: '#131722',
-    fontFamily: "-apple-system, 'Trebuchet MS', Roboto, Helvetica, Arial, sans-serif",
-  },
-  grid: {
-    vertLines: { visible: false },
-    horzLines: { visible: false },
-  },
-  crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
-  rightPriceScale: { borderColor: '#e0e3eb' },
-  timeScale: { visible: false },
-});
-const rsiSeries = rsiChart.addLineSeries({
-  color: '#131722',
-  lineWidth: 1,
-  priceLineVisible: false,
-  lastValueVisible: false,
-  autoscaleInfoProvider: () => ({ priceRange: { minValue: 0, maxValue: 100 } }),
-});
-rsiSeries.createPriceLine({ price: 60, color: '#c0c4cc', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, axisLabelVisible: true, title: '' });
-rsiSeries.createPriceLine({ price: 40, color: '#c0c4cc', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, axisLabelVisible: true, title: '' });
-
-// Keep the two charts' visible time ranges in sync (panning/zooming one
-// moves the other). The "syncing" flags prevent an infinite feedback
-// loop between the two subscriptions.
+let rsiChart = null;
+let rsiSeries = null;
 let syncingFromMain = false, syncingFromRsi = false;
+
+function createRsiChart() {
+  rsiChart = LightweightCharts.createChart(rsiChartEl, {
+    layout: {
+      background: { color: '#ffffff' },
+      textColor: '#131722',
+      fontFamily: "-apple-system, 'Trebuchet MS', Roboto, Helvetica, Arial, sans-serif",
+    },
+    grid: {
+      vertLines: { visible: false },
+      horzLines: { visible: false },
+    },
+    crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+    rightPriceScale: { borderColor: '#e0e3eb' },
+    timeScale: { visible: false },
+    width: rsiChartEl.clientWidth,
+    height: rsiChartEl.clientHeight,
+  });
+  rsiSeries = rsiChart.addLineSeries({
+    color: '#131722',
+    lineWidth: 1,
+    priceLineVisible: false,
+    lastValueVisible: false,
+    autoscaleInfoProvider: () => ({ priceRange: { minValue: 0, maxValue: 100 } }),
+  });
+  rsiSeries.createPriceLine({ price: 60, color: '#c0c4cc', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, axisLabelVisible: true, title: '' });
+  rsiSeries.createPriceLine({ price: 40, color: '#c0c4cc', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, axisLabelVisible: true, title: '' });
+
+  if (barsData.length) {
+    rsiSeries.setData(calculateRSI(barsData, 14));
+  }
+  const mainRange = chart.timeScale().getVisibleLogicalRange();
+  if (mainRange) rsiChart.timeScale().setVisibleLogicalRange(mainRange);
+
+  rsiChart.timeScale().subscribeVisibleLogicalRangeChange(range => {
+    if (!range || syncingFromMain) return;
+    syncingFromRsi = true;
+    chart.timeScale().setVisibleLogicalRange(range);
+    syncingFromRsi = false;
+  });
+}
+
+// The main chart's half of the sync is set up ONCE (it survives RSI
+// being destroyed/recreated) - guarded so it does nothing if rsiChart
+// doesn't currently exist (RSI is switched off).
 chart.timeScale().subscribeVisibleLogicalRangeChange(range => {
-  if (!range || syncingFromRsi) return;
+  if (!range || syncingFromRsi || !rsiChart) return;
   syncingFromMain = true;
   rsiChart.timeScale().setVisibleLogicalRange(range);
   syncingFromMain = false;
 });
-rsiChart.timeScale().subscribeVisibleLogicalRangeChange(range => {
-  if (!range || syncingFromMain) return;
-  syncingFromRsi = true;
-  chart.timeScale().setVisibleLogicalRange(range);
-  syncingFromRsi = false;
-});
+
+createRsiChart();
 
 function calculateRSI(bars, period = 14) {
   const out = [];
@@ -733,7 +754,7 @@ function loadTimeframe(tf) {
       currentVolumeEma3 = calculateEMA(data, 3, 'volume');
       currentVolumeEma20 = calculateEMA(data, 20, 'volume');
       turnoverEmaSeries.setData(currentVolumeEma20);
-      rsiSeries.setData(calculateRSI(data, 14));
+      if (rsiSeries) rsiSeries.setData(calculateRSI(data, 14));
 
       chart.applyOptions({ timeScale: { timeVisible: cfg.intraday, borderColor: '#e0e3eb' } });
       chart.timeScale().fitContent();
@@ -855,13 +876,15 @@ function setRsiEnabled(enabled) {
   chart.applyOptions({ width: chartEl.clientWidth, height: chartEl.clientHeight });
   if (enabled) {
     // Wait a frame for the browser to actually finish showing the
-    // panel before measuring it - reading its size in the same tick
-    // as un-hiding it can still report 0, which left the chart
-    // unable to recover on a later toggle.
+    // panel before creating the chart in it - creating it in the same
+    // tick as un-hiding can still measure a zero-size container.
     requestAnimationFrame(() => {
-      rsiChart.applyOptions({ width: rsiChartEl.clientWidth, height: rsiChartEl.clientHeight });
-      rsiChart.timeScale().setVisibleLogicalRange(chart.timeScale().getVisibleLogicalRange());
+      createRsiChart();
     });
+  } else if (rsiChart) {
+    rsiChart.remove();
+    rsiChart = null;
+    rsiSeries = null;
   }
 }
 
@@ -986,7 +1009,7 @@ document.getElementById('copy-btn').addEventListener('click', () => {
 
 window.addEventListener('resize', () => {
   chart.applyOptions({ width: chartEl.clientWidth, height: chartEl.clientHeight });
-  if (rsiEnabled) {
+  if (rsiEnabled && rsiChart) {
     rsiChart.applyOptions({ width: rsiChartEl.clientWidth, height: rsiChartEl.clientHeight });
   }
   renderEarningsOverlay();

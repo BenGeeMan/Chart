@@ -17,7 +17,6 @@
     --accent: #2962ff;
     --accent-hover: #1e53e5;
     --mono: 'SF Mono', 'Consolas', 'Menlo', monospace;
-    --panel-offset: 24%;
   }
   * { box-sizing: border-box; }
   html, body {
@@ -67,8 +66,26 @@
   .tf-btn.active { background: rgba(41,98,255,0.10); color: var(--accent); }
 
   #chart-pane {
-    position: relative;
+    display: flex;
+    flex-direction: column;
     background: var(--bg);
+  }
+  #main-chart-area {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+  }
+  #rsi-chart-container {
+    flex: none;
+    height: 150px;
+    border-top: 1px solid var(--panel-border);
+  }
+  #rsi-chart-container.hidden {
+    display: none;
+  }
+  #rsi-chart {
+    width: 100%;
+    height: 100%;
   }
   #chart {
     width: 100%;
@@ -158,7 +175,7 @@
   }
   #turnover-box {
     position: absolute;
-    bottom: calc(var(--panel-offset) + 28px);
+    bottom: 28px;
     left: 0;
     z-index: 5;
     font-size: 11px;
@@ -223,7 +240,7 @@
   }
   .earnings-badge {
     position: absolute;
-    bottom: calc(var(--panel-offset) + 38px);
+    bottom: 38px;
     width: 15px;
     height: 15px;
     background: #ff9800;
@@ -343,31 +360,36 @@
   </div>
 
   <div id="chart-pane">
-    <div id="legend">
-      <div class="headline" id="legend-headline">HPQ · Daily · NYSE</div>
-      <label class="ind-row" data-series="ema_10"><input type="checkbox" checked><span class="swatch" style="background:#000000"></span>EMA 10</label>
-      <label class="ind-row" data-series="ema_20"><input type="checkbox" checked><span class="swatch" style="background:#2962ff"></span>EMA 20</label>
-      <label class="ind-row" data-series="ema_50"><input type="checkbox" checked><span class="swatch" style="background:#26a69a"></span>EMA 50</label>
-      <label class="ind-row" data-series="ema_200"><input type="checkbox" checked><span class="swatch" style="background:#ef5350"></span>EMA 200</label>
-      <label class="ind-row" data-series="ema_cross"><input type="checkbox" checked><span class="swatch" style="background:#ff9800;width:7px;height:7px;border-radius:50%;"></span>10/20 EMA cross</label>
-      <label class="ind-row" data-series="earnings"><input type="checkbox" checked><span class="swatch" style="width:9px;height:9px;background:#ff9800;clip-path:polygon(50% 0%,100% 38%,100% 100%,0% 100%,0% 38%);"></span>Earnings (daily+ only)</label>
-      <label class="ind-row" data-series="turnover" style="margin-top:4px;"><input type="checkbox" checked>Volume (bars, red/teal by direction)</label>
-      <label class="ind-row" data-series="turnover_ema"><input type="checkbox" checked><span class="swatch dashed" style="border-color:#5b8ff9"></span>Volume EMA 20</label>
-      <label class="ind-row" data-series="rsi" style="margin-top:4px;"><input type="checkbox" checked><span class="swatch" style="background:#131722"></span>RSI (14)</label>
+    <div id="main-chart-area">
+      <div id="legend">
+        <div class="headline" id="legend-headline">HPQ · Daily · NYSE</div>
+        <label class="ind-row" data-series="ema_10"><input type="checkbox" checked><span class="swatch" style="background:#000000"></span>EMA 10</label>
+        <label class="ind-row" data-series="ema_20"><input type="checkbox" checked><span class="swatch" style="background:#2962ff"></span>EMA 20</label>
+        <label class="ind-row" data-series="ema_50"><input type="checkbox" checked><span class="swatch" style="background:#26a69a"></span>EMA 50</label>
+        <label class="ind-row" data-series="ema_200"><input type="checkbox" checked><span class="swatch" style="background:#ef5350"></span>EMA 200</label>
+        <label class="ind-row" data-series="ema_cross"><input type="checkbox" checked><span class="swatch" style="background:#ff9800;width:7px;height:7px;border-radius:50%;"></span>10/20 EMA cross</label>
+        <label class="ind-row" data-series="earnings"><input type="checkbox" checked><span class="swatch" style="width:9px;height:9px;background:#ff9800;clip-path:polygon(50% 0%,100% 38%,100% 100%,0% 100%,0% 38%);"></span>Earnings (daily+ only)</label>
+        <label class="ind-row" data-series="turnover" style="margin-top:4px;"><input type="checkbox" checked>Volume (bars, red/teal by direction)</label>
+        <label class="ind-row" data-series="turnover_ema"><input type="checkbox" checked><span class="swatch dashed" style="border-color:#5b8ff9"></span>Volume EMA 20</label>
+        <label class="ind-row" data-series="rsi" style="margin-top:4px;"><input type="checkbox" checked><span class="swatch" style="background:#131722"></span>RSI (14)</label>
+      </div>
+      <div id="turnover-box">
+        <div class="row"><span class="label">LT</span><span class="value" id="turnover-lt">—</span></div>
+        <div class="row"><span class="label">AT (3)</span><span class="value" id="turnover-at3">—</span></div>
+        <div class="row"><span class="label">AT (20)</span><span class="value" id="turnover-at20">—</span></div>
+      </div>
+      <div id="turnover-box-daily">
+        <div class="ind-title">Current daily</div>
+        <div class="row"><span class="label">LT</span><span class="value" id="turnover-daily-lt">—</span></div>
+        <div class="row"><span class="label">AT (3)</span><span class="value" id="turnover-daily-at3">—</span></div>
+        <div class="row"><span class="label">AT (20)</span><span class="value" id="turnover-daily-at20">—</span></div>
+      </div>
+      <div id="earnings-overlay"></div>
+      <div id="chart"></div>
     </div>
-    <div id="turnover-box">
-      <div class="row"><span class="label">LT</span><span class="value" id="turnover-lt">—</span></div>
-      <div class="row"><span class="label">AT (3)</span><span class="value" id="turnover-at3">—</span></div>
-      <div class="row"><span class="label">AT (20)</span><span class="value" id="turnover-at20">—</span></div>
+    <div id="rsi-chart-container">
+      <div id="rsi-chart"></div>
     </div>
-    <div id="turnover-box-daily">
-      <div class="ind-title">Current daily</div>
-      <div class="row"><span class="label">LT</span><span class="value" id="turnover-daily-lt">—</span></div>
-      <div class="row"><span class="label">AT (3)</span><span class="value" id="turnover-daily-at3">—</span></div>
-      <div class="row"><span class="label">AT (20)</span><span class="value" id="turnover-daily-at20">—</span></div>
-    </div>
-    <div id="earnings-overlay"></div>
-    <div id="chart"></div>
   </div>
 
   <div id="sidebar">
@@ -471,17 +493,17 @@ function calculateEMA(bars, period, field = 'close') {
   });
 }
 
-// Layout: three stacked panels sharing one chart canvas, each with its
-// own price scale and scaleMargins - price chart on top (~55%), volume
-// in the middle (~20%), RSI at the bottom (~20%), with small gaps.
-chart.priceScale('right').applyOptions({ scaleMargins: { top: 0.05, bottom: 0.45 } });
+// Layout: two stacked bands sharing the main chart's canvas - price on
+// top (~75%), volume at the bottom (~25%). RSI is NOT part of this
+// canvas - see the separate chart instance below, which avoids the
+// axis-label-bleed problem entirely by using its own dedicated canvas.
+chart.priceScale('right').applyOptions({ scaleMargins: { top: 0.05, bottom: 0.25 } });
 
-// Turnover sub-panel - the middle band.
 const turnoverSeries = chart.addHistogramSeries({
   priceFormat: { type: 'volume' },
   priceScaleId: 'turnover',
 });
-chart.priceScale('turnover').applyOptions({ scaleMargins: { top: 0.58, bottom: 0.24 } });
+chart.priceScale('turnover').applyOptions({ scaleMargins: { top: 0.78, bottom: 0 } });
 
 const turnoverEmaSeries = chart.addLineSeries({
   color: '#5b8ff9',
@@ -493,22 +515,53 @@ const turnoverEmaSeries = chart.addLineSeries({
   crosshairMarkerVisible: false,
 });
 
-// RSI sub-panel - the bottom band. Standard 14-period Wilder's RSI,
-// calculated client-side from close prices (not in the exported data
-// files). Two dashed reference lines at 40/60 mark the neutral zone,
-// matching your TradingView setup.
-const rsiSeries = chart.addLineSeries({
+// RSI - a genuinely SEPARATE chart instance (its own canvas, own axis),
+// not sharing the main chart's canvas at all. This is the standard way
+// to build a true separate sub-panel with this library, since a single
+// canvas's price-axis labels always span its FULL height regardless of
+// scaleMargins - which is exactly what caused RSI's earlier bleed-into-
+// the-price-axis problem. Synced to the main chart's time scale below.
+const rsiChartEl = document.getElementById('rsi-chart');
+const rsiChart = LightweightCharts.createChart(rsiChartEl, {
+  layout: {
+    background: { color: '#ffffff' },
+    textColor: '#131722',
+    fontFamily: "-apple-system, 'Trebuchet MS', Roboto, Helvetica, Arial, sans-serif",
+  },
+  grid: {
+    vertLines: { color: '#f0f3fa' },
+    horzLines: { color: '#f0f3fa' },
+  },
+  crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+  rightPriceScale: { borderColor: '#e0e3eb' },
+  timeScale: { borderColor: '#e0e3eb', visible: true },
+});
+const rsiSeries = rsiChart.addLineSeries({
   color: '#131722',
   lineWidth: 1,
-  priceScaleId: 'rsi',
   priceLineVisible: false,
   lastValueVisible: false,
-  crosshairMarkerVisible: false,
   autoscaleInfoProvider: () => ({ priceRange: { minValue: 0, maxValue: 100 } }),
 });
-chart.priceScale('rsi').applyOptions({ scaleMargins: { top: 0.83, bottom: 0.02 } });
 rsiSeries.createPriceLine({ price: 60, color: '#c0c4cc', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, axisLabelVisible: true, title: '' });
 rsiSeries.createPriceLine({ price: 40, color: '#c0c4cc', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, axisLabelVisible: true, title: '' });
+
+// Keep the two charts' visible time ranges in sync (panning/zooming one
+// moves the other). The "syncing" flags prevent an infinite feedback
+// loop between the two subscriptions.
+let syncingFromMain = false, syncingFromRsi = false;
+chart.timeScale().subscribeVisibleLogicalRangeChange(range => {
+  if (!range || syncingFromRsi) return;
+  syncingFromMain = true;
+  rsiChart.timeScale().setVisibleLogicalRange(range);
+  syncingFromMain = false;
+});
+rsiChart.timeScale().subscribeVisibleLogicalRangeChange(range => {
+  if (!range || syncingFromMain) return;
+  syncingFromRsi = true;
+  chart.timeScale().setVisibleLogicalRange(range);
+  syncingFromRsi = false;
+});
 
 function calculateRSI(bars, period = 14) {
   const out = [];
@@ -790,35 +843,19 @@ document.querySelectorAll('#legend .ind-row[data-series]').forEach(row => {
   });
 });
 
-// RSI is a whole extra PANEL, not just a line - unlike the other
-// checkboxes, unchecking it needs to collapse its reserved space
-// entirely and let the price chart and volume panel expand back into
-// it, rather than just hiding the RSI line within a still-reserved
-// blank area.
+// RSI is now a genuinely separate chart instance below the main one -
+// toggling it just shows/hides that whole section and lets the main
+// chart's own container (flex: 1) naturally expand or shrink to fill
+// the freed space, then resizes both chart instances to match.
 let rsiEnabled = true;
-const LAYOUT_WITH_RSI = {
-  price: { top: 0.05, bottom: 0.45 },
-  turnover: { top: 0.58, bottom: 0.24 },
-};
-const LAYOUT_WITHOUT_RSI = {
-  price: { top: 0.05, bottom: 0.25 },
-  turnover: { top: 0.78, bottom: 0 },
-};
 
 function setRsiEnabled(enabled) {
   rsiEnabled = enabled;
-  const layout = enabled ? LAYOUT_WITH_RSI : LAYOUT_WITHOUT_RSI;
-  chart.priceScale('right').applyOptions({ scaleMargins: layout.price });
-  chart.priceScale('turnover').applyOptions({ scaleMargins: layout.turnover });
-  chart.priceScale('rsi').applyOptions({ visible: enabled });
-  rsiSeries.applyOptions({ visible: enabled });
-  // The turnover box and earnings badges are positioned relative to
-  // where the volume panel's own bottom boundary sits - that boundary
-  // moves depending on whether RSI's space is reserved or not, so this
-  // CSS variable (referenced in both elements' `bottom` calc()) is how
-  // they stay correctly anchored either way.
-  document.documentElement.style.setProperty('--panel-offset', enabled ? '24%' : '0%');
-  renderEarningsOverlay();
+  document.getElementById('rsi-chart-container').classList.toggle('hidden', !enabled);
+  chart.applyOptions({ width: chartEl.clientWidth, height: chartEl.clientHeight });
+  if (enabled) {
+    rsiChart.applyOptions({ width: rsiChartEl.clientWidth, height: rsiChartEl.clientHeight });
+  }
 }
 
 function setStatus(msg, isError) {
@@ -942,6 +979,9 @@ document.getElementById('copy-btn').addEventListener('click', () => {
 
 window.addEventListener('resize', () => {
   chart.applyOptions({ width: chartEl.clientWidth, height: chartEl.clientHeight });
+  if (rsiEnabled) {
+    rsiChart.applyOptions({ width: rsiChartEl.clientWidth, height: rsiChartEl.clientHeight });
+  }
   renderEarningsOverlay();
   positionDailyBox();
 });

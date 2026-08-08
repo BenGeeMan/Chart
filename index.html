@@ -412,7 +412,7 @@
       </div>
       <div id="earnings-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">13</div>
+      <div id="build-number">14</div>
     </div>
     <div id="rsi-chart-container">
       <div id="rsi-label">RSI (14)</div>
@@ -1061,7 +1061,7 @@ chart.timeScale().subscribeVisibleLogicalRangeChange(() => renderEarningsOverlay
 // guessed as a fixed pixel value.
 function positionDailyBox() {
   const priceScaleWidth = chart.priceScale('right').width();
-  document.getElementById('turnover-box-daily').style.right = (priceScaleWidth + 2) + 'px';
+  document.getElementById('turnover-box-daily').style.right = priceScaleWidth + 'px';
 }
 positionDailyBox();
 

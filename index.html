@@ -183,7 +183,7 @@
   #turnover-box-daily {
     position: absolute;
     top: 10px;
-    left: 12px;
+    right: 12px;
     z-index: 5;
     font-size: 11px;
     line-height: 1.7;
@@ -419,26 +419,19 @@ const crossoverSeries = chart.addLineSeries({
 });
 
 // Same trick again for earnings markers - an invisible line series that
-// only exists to host "E" badge markers, rendered in the same visual
-// band as the volume panel. Given its OWN dedicated price scale (rather
-// than sharing 'turnover' with the volume bars) - Lightweight Charts
-// reserves extra headroom above a series for its markers, and sharing a
-// scale with the volume bars was pushing their range and visually
-// compressing them, leaving blank space above. A separate scale with
-// matching margins avoids that while still looking like the same panel.
+// only exists to host "E" badge markers. Uses the MAIN price scale
+// (same as the candles/EMAs), at a constant value between $15.00 and
+// $15.60 - so its height is a real, meaningful price level rather than
+// an arbitrary position within the volume panel.
 // TradingView's house-shaped "E" icon isn't a shape Lightweight Charts
-// can draw natively; this uses a labeled square badge instead (teal for
-// past earnings, magenta for the next upcoming one) as the closest
-// practical equivalent.
+// can draw natively; this uses a labeled circle badge instead.
 const earningsSeries = chart.addLineSeries({
   color: 'rgba(0,0,0,0)',
   lineWidth: 1,
-  priceScaleId: 'earnings_overlay',
   priceLineVisible: false,
   lastValueVisible: false,
   crosshairMarkerVisible: false,
 });
-chart.priceScale('earnings_overlay').applyOptions({ scaleMargins: { top: 0.75, bottom: 0 }, visible: false });
 let earningsData = {};
 
 fetch('chart_earnings.json')
@@ -621,19 +614,17 @@ function loadTimeframe(tf) {
       crossoverMarkers = computeCrossoverMarkers(data);
       crossoverSeries.setData(data.filter(d => d.ema_10 != null).map(d => ({ time: d.time, value: d.ema_10 })));
       crossoverSeries.setMarkers(crossoverMarkers);
-      // Earnings badges always sit at the SAME fixed distance from the
-      // bottom of the panel, regardless of ticker or timeframe. This uses
-      // synthetic values (not real volume data) on the earnings series'
-      // own dedicated scale: two "anchor" points fix that scale's range
-      // to always be exactly 0-11, and every actual badge sits at a
-      // constant value of 5 within that fixed range (roughly mid-height,
-      // so it overlays within the volume bars rather than floating above
-      // them) - its relative (and therefore pixel) position never changes.
-      const earningsAnchoredData = data.map((d, i) => ({
-        time: d.time,
-        value: (i === 0) ? 0 : (i === data.length - 1) ? 11 : 5,
-      }));
-      earningsSeries.setData(earningsAnchoredData);
+      // Earnings badges sit a small, consistent gap above the LOWEST
+      // point of the visible price range - real price data, not an
+      // arbitrary position, but low enough to visually sit near/within
+      // the volume panel below. Using a PERCENTAGE of the price range
+      // (not a fixed dollar amount) means this works correctly across
+      // every stock regardless of its price level, not just HPQ.
+      const lowestPrice = Math.min(...data.map(d => d.low));
+      const highestPrice = Math.max(...data.map(d => d.high));
+      const priceRange = highestPrice - lowestPrice;
+      const earningsBadgePrice = lowestPrice + priceRange * 0.03;
+      earningsSeries.setData(data.map(d => ({ time: d.time, value: earningsBadgePrice })));
       earningsSeries.setMarkers(computeEarningsMarkers(data, cfg.intraday));
       refreshMarkers();
       for (const pl of priceLines) series.removePriceLine(pl.lwcHandle);
@@ -859,15 +850,6 @@ window.addEventListener('resize', () => {
 
 loadTimeframe('daily');
 loadDailySnapshot(currentTicker);
-
-// Position the daily snapshot box directly below the indicator legend
-// (rather than a guessed fixed offset), so it never overlaps the
-// checkboxes above it even if that list's length changes later.
-function positionDailyBox() {
-  const legendHeight = document.getElementById('legend').offsetHeight;
-  document.getElementById('turnover-box-daily').style.top = (legendHeight + 20) + 'px';
-}
-positionDailyBox();
 </script>
 </body>
 </html>

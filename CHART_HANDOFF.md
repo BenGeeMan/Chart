@@ -64,7 +64,16 @@ next time, in this order:
    for the full current client-side-vs-pipeline breakdown.
 6. **Expand/improve the watchlist** - likely connecting it to the full
    daily scan output rather than the fixed 11 hand-picked stocks.
-7. **Only after 1-6 are solid**, move on to the actual end goal of this
+7. **Add a "Technical Reference" section to both this document AND
+   `PROJECT_HANDOFF.md`** - the user asked whether current docs contain
+   enough for an AI to rebuild either project from scratch, possibly on
+   a different platform. Honest answer given: the *concept*, *history*,
+   and *gotchas* are well covered, but hard implementation detail isn't
+   - exact data schema/field names, exact color values, exact layout
+   proportions currently only exist in the actual code, not written
+   into the docs as a standalone reference. Needs fixing in both repos'
+   docs, not just this one.
+8. **Only after 1-7 are solid**, move on to the actual end goal of this
    whole project: teaching Claude the user's trading-decision logic
    through this visual tool, so it can eventually become real
    automated logic. This has not been started.
@@ -320,6 +329,34 @@ way around, so both are consistent everywhere.
 
 **Column master checkboxes remember individual state** on toggle
 off/on, rather than resetting to "everything on."
+
+**For "must sit at an exact, predictable pixel position" requirements,
+prefer plain CSS over fighting a charting library's own coordinate
+system.** Getting the earnings badges to sit at a consistent height
+took several failed rounds using Lightweight Charts' own marker/
+price-scale system (synthetic anchor values, fixed-range scales, a
+dedicated price scale) - none behaved predictably. Switching to plain
+HTML `<div>` elements (X position from the chart's own
+`timeToCoordinate()`, Y position an ordinary fixed CSS value) solved
+it immediately and reliably. If a future indicator/badge needs "always
+exactly N pixels from an edge" positioning, start with this approach
+rather than the library's scale system.
+
+**GitHub Pages URLs are case-sensitive.** A repo named `Chart`
+(capital C) serves at `.../Chart/`, not `.../chart/` - visiting the
+lowercase version 404s even though it looks like the same address.
+Caused real confusion once already; if a live page ever 404s
+unexpectedly, check the exact repo name's capitalization before
+assuming a deployment or code problem.
+
+**Browser caching caused repeated false "it's still broken" reports
+during this session, even after fixes were genuinely deployed.** The
+build-number watermark (Section 2) exists specifically to catch this.
+**Whenever the user reports something as not working that should
+already be fixed, ask them to confirm the watermark number and do a
+hard refresh (Ctrl+Shift+R / Cmd+Shift+R) before investigating
+further** - several rounds of debugging in this session turned out to
+be chasing a stale cached version rather than a real bug.
 
 **The right sidebar was removed entirely this session** (replaced by
 header icon buttons + a temporary paste modal + a status bar). Every

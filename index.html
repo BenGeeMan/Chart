@@ -214,6 +214,9 @@
     min-width: 90px;
   }
   .ind-col-title {
+    display: flex;
+    align-items: center;
+    gap: 5px;
     font-size: 9px;
     font-weight: 700;
     letter-spacing: 0.4px;
@@ -222,6 +225,7 @@
     margin-bottom: 3px;
     white-space: nowrap;
   }
+  .col-master { margin: 0; cursor: pointer; }
   #legend .ind-row {
     display: flex;
     align-items: center;
@@ -469,7 +473,7 @@
         <button id="indicators-toggle" type="button">Indicators <span id="indicators-chevron">▾</span></button>
         <div id="indicators-panel">
           <div class="ind-col">
-            <div class="ind-col-title">Price EMAs</div>
+            <div class="ind-col-title"><input type="checkbox" checked class="col-master">Price EMAs</div>
             <label class="ind-row" data-series="ema_10"><input type="checkbox" checked><span class="swatch" style="background:#000000"></span>EMA 10</label>
             <label class="ind-row" data-series="ema_20"><input type="checkbox" checked><span class="swatch" style="background:#2962ff"></span>EMA 20</label>
             <label class="ind-row" data-series="ema_50"><input type="checkbox" checked><span class="swatch" style="background:#26a69a"></span>EMA 50</label>
@@ -477,7 +481,7 @@
             <label class="ind-row" data-series="ema_cross"><input type="checkbox" checked><span class="swatch" style="background:#ff9800;width:7px;height:7px;border-radius:50%;"></span>10/20 EMA cross</label>
           </div>
           <div class="ind-col">
-            <div class="ind-col-title">Timeframe EMAs (10)</div>
+            <div class="ind-col-title"><input type="checkbox" class="col-master">Timeframe EMAs (10)</div>
             <label class="ind-row" data-mtf-ema="m5"><input type="checkbox"><span class="swatch" style="background:#e91e63"></span>5m</label>
             <label class="ind-row" data-mtf-ema="m15"><input type="checkbox"><span class="swatch" style="background:#fb8c00"></span>15m</label>
             <label class="ind-row" data-mtf-ema="hourly"><input type="checkbox"><span class="swatch" style="background:#8e24aa"></span>1H</label>
@@ -487,13 +491,18 @@
             <label class="ind-row" data-mtf-ema="quarterly"><input type="checkbox"><span class="swatch" style="background:#7cb342"></span>Quarterly</label>
           </div>
           <div class="ind-col">
-            <div class="ind-col-title">Volume &amp; Earnings</div>
+            <div class="ind-col-title"><input type="checkbox" class="col-master">Relative EMAs (10)</div>
+            <label class="ind-row" data-rel-ema="rel1"><input type="checkbox"><span class="swatch" style="background:#f9a825"></span>1 TF above</label>
+            <label class="ind-row" data-rel-ema="rel2"><input type="checkbox"><span class="swatch" style="background:#455a64"></span>2 TFs above</label>
+          </div>
+          <div class="ind-col">
+            <div class="ind-col-title"><input type="checkbox" checked class="col-master">Volume &amp; Earnings</div>
             <label class="ind-row" data-series="earnings"><input type="checkbox" checked><span class="swatch" style="width:9px;height:9px;background:#ff9800;clip-path:polygon(50% 0%,100% 38%,100% 100%,0% 100%,0% 38%);"></span>Earnings</label>
             <label class="ind-row" data-series="turnover"><input type="checkbox" checked>Volume</label>
             <label class="ind-row" data-series="turnover_ema"><input type="checkbox" checked><span class="swatch dashed" style="border-color:#5b8ff9"></span>Volume EMA 20</label>
           </div>
           <div class="ind-col">
-            <div class="ind-col-title">RSI</div>
+            <div class="ind-col-title"><input type="checkbox" checked class="col-master">RSI</div>
             <label class="ind-row" data-series="rsi"><input type="checkbox" checked><span class="swatch" style="background:#131722"></span>RSI (14)</label>
           </div>
         </div>
@@ -511,7 +520,7 @@
       </div>
       <div id="earnings-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">18</div>
+      <div id="build-number">19</div>
       <div id="main-no-data">No Data</div>
     </div>
     <div id="rsi-chart-container">
@@ -668,6 +677,53 @@ function loadMtfEma(tf) {
 
 function refreshAllEnabledMtfEmas() {
   Object.keys(mtfEmaEnabled).forEach(tf => { if (mtfEmaEnabled[tf]) loadMtfEma(tf); });
+}
+
+// "1 timeframe above" / "2 timeframes above" - these represent WHATEVER
+// timeframe is one or two steps larger than the main chart's CURRENT
+// timeframe, recalculated dynamically. E.g. viewing Daily, "1 above" is
+// Weekly; switch the main chart to Weekly, and "1 above" becomes
+// Monthly automatically - same checkbox, different underlying data.
+const TF_ORDER = ['m5', 'm15', 'hourly', 'daily', 'weekly', 'monthly', 'quarterly'];
+const RELATIVE_EMA_COLORS = { rel1: '#f9a825', rel2: '#455a64' };
+const relEmaSeries = {};
+const relEmaEnabled = { rel1: false, rel2: false };
+Object.keys(RELATIVE_EMA_COLORS).forEach(key => {
+  relEmaSeries[key] = chart.addLineSeries({
+    color: RELATIVE_EMA_COLORS[key], lineWidth: 1, priceLineVisible: false,
+    lastValueVisible: false, crosshairMarkerVisible: false,
+  });
+});
+
+function getRelativeTF(offset) {
+  const idx = TF_ORDER.indexOf(currentTF);
+  const targetIdx = idx + offset;
+  return targetIdx < TF_ORDER.length ? TF_ORDER[targetIdx] : null;
+}
+
+function loadRelEma(key, offset) {
+  if (!relEmaEnabled[key]) {
+    relEmaSeries[key].setData([]);
+    return;
+  }
+  const targetTF = getRelativeTF(offset);
+  if (!targetTF) {
+    relEmaSeries[key].setData([]); // no higher timeframe exists (e.g. already on Quarterly)
+    return;
+  }
+  fetch(`${currentTicker.toLowerCase()}_${targetTF}.json`)
+    .then(r => r.json())
+    .then(data => {
+      if (!data || data.length === 0) { relEmaSeries[key].setData([]); return; }
+      const ema10 = calculateEMA(data, 10, 'close');
+      relEmaSeries[key].setData(alignTimeToCurrentChart(ema10));
+    })
+    .catch(() => setStatus(`Could not load ${targetTF} EMA 10 overlay.`, true));
+}
+
+function refreshAllEnabledRelEmas() {
+  if (relEmaEnabled.rel1) loadRelEma('rel1', 1);
+  if (relEmaEnabled.rel2) loadRelEma('rel2', 2);
 }
 
 // Dedicated, fully transparent series that ONLY exists to host the EMA
@@ -1039,6 +1095,7 @@ function loadTimeframe(tf) {
       document.querySelectorAll('.tf-btn').forEach(b => b.classList.toggle('active', b.dataset.tf === tf));
       setStatus(`Switched to ${cfg.label}. Drawings were cleared - this is a new resolution.`, false);
       refreshAllEnabledMtfEmas();
+      refreshAllEnabledRelEmas();
     })
     .catch(err => {
       document.getElementById('main-no-data').classList.add('show');
@@ -1074,6 +1131,7 @@ function switchTicker(ticker) {
   loadDailySnapshot(ticker);
   if (rsiChart) loadRsiData(currentTF);
   refreshAllEnabledMtfEmas();
+  refreshAllEnabledRelEmas();
 }
 
 function renderWatchlist() {
@@ -1104,6 +1162,37 @@ fetch('chart_watchlist.json')
 
 document.getElementById('indicators-toggle').addEventListener('click', () => {
   document.getElementById('legend').classList.toggle('expanded');
+});
+
+// Column master checkboxes - turning a column off remembers each row's
+// individual checked state and restores exactly that (not just "all
+// on") when turned back on. Uses each row's own checkbox 'change' event
+// (already wired above) rather than duplicating the enable/disable
+// logic here.
+const columnMemory = {};
+document.querySelectorAll('.ind-col').forEach((col, colIndex) => {
+  const master = col.querySelector('.col-master');
+  const rowCheckboxes = [...col.querySelectorAll('.ind-row input[type="checkbox"]')];
+  master.addEventListener('change', () => {
+    if (!master.checked) {
+      columnMemory[colIndex] = rowCheckboxes.map(cb => cb.checked);
+      rowCheckboxes.forEach(cb => {
+        if (cb.checked) {
+          cb.checked = false;
+          cb.dispatchEvent(new Event('change'));
+        }
+      });
+    } else {
+      const saved = columnMemory[colIndex];
+      rowCheckboxes.forEach((cb, i) => {
+        const shouldBeChecked = saved ? saved[i] : cb.checked;
+        if (cb.checked !== shouldBeChecked) {
+          cb.checked = shouldBeChecked;
+          cb.dispatchEvent(new Event('change'));
+        }
+      });
+    }
+  });
 });
 
 document.querySelectorAll('.tf-btn').forEach(btn => {
@@ -1137,6 +1226,20 @@ document.querySelectorAll('#legend .ind-row[data-mtf-ema]').forEach(row => {
   checkbox.addEventListener('change', () => {
     mtfEmaEnabled[tf] = checkbox.checked;
     loadMtfEma(tf);
+    row.classList.toggle('off', !checkbox.checked);
+  });
+});
+
+// "1/2 timeframes above" - same idea as above, but the target
+// timeframe is recalculated relative to whatever the main chart is
+// currently showing rather than being fixed.
+document.querySelectorAll('#legend .ind-row[data-rel-ema]').forEach(row => {
+  const key = row.dataset.relEma;
+  const offset = key === 'rel1' ? 1 : 2;
+  const checkbox = row.querySelector('input');
+  checkbox.addEventListener('change', () => {
+    relEmaEnabled[key] = checkbox.checked;
+    loadRelEma(key, offset);
     row.classList.toggle('off', !checkbox.checked);
   });
 });

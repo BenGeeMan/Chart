@@ -49,7 +49,7 @@
   .tf-buttons {
     display: flex;
     gap: 2px;
-    margin-left: auto;
+    margin-left: 12px;
   }
   .tf-btn {
     flex: none;
@@ -77,9 +77,21 @@
     min-height: 0;
   }
   #rsi-chart-container {
+    position: relative;
     flex: none;
     height: 150px;
     border-top: 1px solid var(--panel-border);
+  }
+  #rsi-label {
+    position: absolute;
+    top: 4px;
+    left: 12px;
+    z-index: 5;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text);
+    pointer-events: none;
+    user-select: none;
   }
   #rsi-chart-container.hidden {
     display: none;
@@ -400,9 +412,10 @@
       </div>
       <div id="earnings-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">9</div>
+      <div id="build-number">13</div>
     </div>
     <div id="rsi-chart-container">
+      <div id="rsi-label">RSI (14)</div>
       <div id="rsi-chart"></div>
     </div>
   </div>
@@ -470,6 +483,7 @@ const series = chart.addCandlestickSeries({
   borderDownColor: '#000000',
   wickUpColor: '#000000',
   wickDownColor: '#000000',
+  lastValueVisible: false,
 });
 
 // EMA overlays, sharing the main price scale.
@@ -527,6 +541,7 @@ chart.priceScale('right').applyOptions({ scaleMargins: { top: 0.05, bottom: 0.25
 const turnoverSeries = chart.addHistogramSeries({
   priceFormat: { type: 'volume' },
   priceScaleId: 'turnover',
+  lastValueVisible: false,
 });
 chart.priceScale('turnover').applyOptions({ scaleMargins: { top: 0.78, bottom: 0 } });
 
@@ -581,8 +596,8 @@ function createRsiChart() {
     lastValueVisible: false,
     autoscaleInfoProvider: () => ({ priceRange: { minValue: 0, maxValue: 100 } }),
   });
-  rsiSeries.createPriceLine({ price: 60, color: '#c0c4cc', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, axisLabelVisible: true, title: '' });
-  rsiSeries.createPriceLine({ price: 40, color: '#c0c4cc', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, axisLabelVisible: true, title: '' });
+  rsiSeries.createPriceLine({ price: 60, color: '#9a9ea6', lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dashed, axisLabelVisible: true, title: '' });
+  rsiSeries.createPriceLine({ price: 40, color: '#9a9ea6', lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dashed, axisLabelVisible: true, title: '' });
 
   if (barsData.length) {
     rsiSeries.setData(calculateRSI(barsData, 14));
@@ -1046,7 +1061,7 @@ chart.timeScale().subscribeVisibleLogicalRangeChange(() => renderEarningsOverlay
 // guessed as a fixed pixel value.
 function positionDailyBox() {
   const priceScaleWidth = chart.priceScale('right').width();
-  document.getElementById('turnover-box-daily').style.right = (priceScaleWidth + 8) + 'px';
+  document.getElementById('turnover-box-daily').style.right = (priceScaleWidth + 2) + 'px';
 }
 positionDailyBox();
 

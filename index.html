@@ -854,7 +854,14 @@ function setRsiEnabled(enabled) {
   document.getElementById('rsi-chart-container').classList.toggle('hidden', !enabled);
   chart.applyOptions({ width: chartEl.clientWidth, height: chartEl.clientHeight });
   if (enabled) {
-    rsiChart.applyOptions({ width: rsiChartEl.clientWidth, height: rsiChartEl.clientHeight });
+    // Wait a frame for the browser to actually finish showing the
+    // panel before measuring it - reading its size in the same tick
+    // as un-hiding it can still report 0, which left the chart
+    // unable to recover on a later toggle.
+    requestAnimationFrame(() => {
+      rsiChart.applyOptions({ width: rsiChartEl.clientWidth, height: rsiChartEl.clientHeight });
+      rsiChart.timeScale().setVisibleLogicalRange(chart.timeScale().getVisibleLogicalRange());
+    });
   }
 }
 

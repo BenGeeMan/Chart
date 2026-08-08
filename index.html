@@ -1,0 +1,599 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chart Bridge — HPQ</title>
+<script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+<style>
+  :root {
+    --bg: #ffffff;
+    --panel: #f8f9fd;
+    --panel-border: #e0e3eb;
+    --text: #131722;
+    --text-dim: #787b86;
+    --up: #26a69a;
+    --down: #ef5350;
+    --accent: #2962ff;
+    --accent-hover: #1e53e5;
+    --mono: 'SF Mono', 'Consolas', 'Menlo', monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, 'Trebuchet MS', Roboto, Helvetica, Arial, sans-serif;
+    overflow: hidden;
+  }
+  #app {
+    display: grid;
+    grid-template-rows: 44px 1fr;
+    grid-template-columns: 200px 1fr 380px;
+    height: 100vh;
+  }
+  header {
+    grid-column: 1 / 4;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 0 16px;
+    background: var(--bg);
+    border-bottom: 1px solid var(--panel-border);
+  }
+  .symbol {
+    font-weight: 700;
+    font-size: 14px;
+  }
+  .symbol .name { color: var(--text-dim); font-weight: 400; margin-left: 6px; font-size: 12px; }
+  .tf-buttons {
+    display: flex;
+    gap: 2px;
+    margin-left: auto;
+  }
+  .tf-btn {
+    flex: none;
+    background: transparent;
+    color: var(--text-dim);
+    border: none;
+    border-radius: 4px;
+    padding: 6px 11px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .tf-btn:hover { background: rgba(0,0,0,0.04); color: var(--text); }
+  .tf-btn.active { background: rgba(41,98,255,0.10); color: var(--accent); }
+
+  #chart-pane {
+    position: relative;
+    background: var(--bg);
+  }
+  #chart {
+    width: 100%;
+    height: 100%;
+  }
+  #watchlist {
+    background: var(--panel);
+    border-right: 1px solid var(--panel-border);
+    overflow-y: auto;
+  }
+  .watchlist-title {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.6px;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    padding: 12px 12px 8px;
+  }
+  .watch-row {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    padding: 7px 12px;
+    cursor: pointer;
+    border-left: 2px solid transparent;
+  }
+  .watch-row:hover { background: rgba(0,0,0,0.03); }
+  .watch-row.active {
+    background: rgba(41,98,255,0.08);
+    border-left-color: var(--accent);
+  }
+  .watch-row .row-top {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+  }
+  .watch-row .ticker { font-weight: 700; color: var(--text); }
+  .watch-row .last { font-family: var(--mono); color: var(--text); }
+  .watch-row .row-bottom {
+    display: flex;
+    justify-content: space-between;
+    font-size: 10px;
+    color: var(--text-dim);
+  }
+  .watch-row .change-up { color: var(--up); }
+  .watch-row .change-down { color: var(--down); }
+  #legend {
+    position: absolute;
+    top: 10px;
+    left: 12px;
+    z-index: 5;
+    font-size: 12px;
+    line-height: 1.7;
+    pointer-events: none;
+    user-select: none;
+  }
+  #legend .headline {
+    font-weight: 700;
+    color: var(--text);
+  }
+  #legend .headline .change-up { color: var(--up); }
+  #legend .headline .change-down { color: var(--down); }
+  #legend .ind-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-dim);
+    pointer-events: auto;
+    cursor: pointer;
+  }
+  #legend .ind-row.off {
+    opacity: 0.45;
+    text-decoration: line-through;
+  }
+  #legend .ind-row input {
+    margin: 0;
+    cursor: pointer;
+  }
+  #legend .swatch {
+    display: inline-block;
+    width: 12px;
+    height: 2px;
+  }
+  #legend .swatch.dashed {
+    border-top: 2px dashed;
+    height: 0;
+  }
+
+  #sidebar {
+    background: var(--panel);
+    border-left: 1px solid var(--panel-border);
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  .sidebar-section {
+    display: flex;
+    flex-direction: column;
+    flex: none;
+    border-bottom: 1px solid var(--panel-border);
+  }
+  .sidebar-section:last-child { border-bottom: none; }
+  .sidebar-title {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.6px;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    padding: 12px 14px 8px;
+  }
+  textarea {
+    height: 90px;
+    resize: none;
+    background: #ffffff;
+    color: var(--text);
+    border: 1px solid var(--panel-border);
+    border-radius: 4px;
+    margin: 0 14px;
+    padding: 8px 10px;
+    font-family: var(--mono);
+    font-size: 11px;
+    line-height: 1.5;
+  }
+  textarea:focus { outline: 1px solid var(--accent); }
+  textarea::placeholder { color: #a8abb3; }
+  .actions {
+    display: flex;
+    gap: 8px;
+    padding: 10px 14px 14px;
+  }
+  button {
+    flex: 1;
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: 4px;
+    padding: 8px 10px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.12s ease;
+  }
+  button:hover { background: var(--accent-hover); }
+  button.secondary {
+    background: transparent;
+    border: 1px solid var(--panel-border);
+    color: var(--text);
+  }
+  button.secondary:hover { background: rgba(0,0,0,0.03); }
+  #status {
+    font-size: 11px;
+    color: var(--text-dim);
+    padding: 0 14px 10px;
+    min-height: 14px;
+  }
+  #status.error { color: var(--down); }
+  #status.ok { color: var(--up); }
+  .hint {
+    font-size: 11px;
+    color: var(--text-dim);
+    padding: 0 14px 8px;
+    line-height: 1.5;
+  }
+  .hint code {
+    background: rgba(0,0,0,0.05);
+    padding: 1px 4px;
+    border-radius: 3px;
+    color: var(--text);
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div class="symbol" id="header-symbol">HPQ <span class="name">HP Inc.</span></div>
+    <div class="tf-buttons" id="tf-buttons">
+      <button class="tf-btn" data-tf="m5">5m</button>
+      <button class="tf-btn" data-tf="m15">15m</button>
+      <button class="tf-btn" data-tf="hourly">1H</button>
+      <button class="tf-btn active" data-tf="daily">D</button>
+      <button class="tf-btn" data-tf="weekly">W</button>
+      <button class="tf-btn" data-tf="monthly">M</button>
+      <button class="tf-btn" data-tf="quarterly">Q</button>
+    </div>
+  </header>
+
+  <div id="watchlist">
+    <div class="watchlist-title">Watchlist</div>
+    <div id="watchlist-rows"></div>
+  </div>
+
+  <div id="chart-pane">
+    <div id="legend">
+      <div class="headline" id="legend-headline">HPQ · Daily · NYSE</div>
+      <label class="ind-row" data-series="ema_10"><input type="checkbox" checked><span class="swatch" style="background:#2962ff"></span>EMA 10</label>
+      <label class="ind-row" data-series="ema_20"><input type="checkbox" checked><span class="swatch" style="background:#26a69a"></span>EMA 20</label>
+      <label class="ind-row" data-series="ema_50"><input type="checkbox" checked><span class="swatch" style="background:#ef5350"></span>EMA 50</label>
+      <label class="ind-row" data-series="ema_100"><input type="checkbox" checked><span class="swatch dashed" style="border-color:#787b86"></span>EMA 100</label>
+      <div class="ind-row" style="margin-top:4px; cursor:default;">Turnover (bars, red/teal by direction)</div>
+      <label class="ind-row" data-series="turnover_ema"><input type="checkbox" checked><span class="swatch dashed" style="border-color:#5b8ff9"></span>Turnover EMA 20</label>
+    </div>
+    <div id="chart"></div>
+  </div>
+
+  <div id="sidebar">
+    <div class="sidebar-section">
+      <div class="sidebar-title">Paste Claude's Instructions</div>
+      <div class="hint">
+        One command per line. Supported for now:<br>
+        <code>MARKER date=YYYY-MM-DD pos=above|below shape=arrowUp|arrowDown|circle color=green|red|blue text="label"</code><br>
+        <code>LINE price=NUMBER color=green|red|blue label="text"</code>
+      </div>
+      <textarea id="input-box" placeholder="MARKER date=2026-06-15 pos=below shape=arrowUp color=green text=&quot;Bullish crossover&quot;&#10;LINE price=32.50 color=blue label=&quot;Resistance&quot;"></textarea>
+      <div id="status"></div>
+      <div class="actions">
+        <button id="render-btn">Draw on chart</button>
+        <button id="clear-btn" class="secondary">Clear all</button>
+      </div>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="sidebar-title">Chart State (copy to Claude)</div>
+      <div class="hint">Click any candle to mark it and add it here automatically.</div>
+      <textarea id="output-box" readonly placeholder="Nothing on the chart yet."></textarea>
+      <div class="actions">
+        <button id="copy-btn">Copy to clipboard</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const chartEl = document.getElementById('chart');
+const chart = LightweightCharts.createChart(chartEl, {
+  layout: {
+    background: { color: '#ffffff' },
+    textColor: '#131722',
+    fontFamily: "-apple-system, 'Trebuchet MS', Roboto, Helvetica, Arial, sans-serif",
+  },
+  grid: {
+    vertLines: { color: '#f0f3fa' },
+    horzLines: { color: '#f0f3fa' },
+  },
+  crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+  rightPriceScale: { borderColor: '#e0e3eb' },
+  timeScale: { borderColor: '#e0e3eb', timeVisible: false },
+});
+
+// Candles: hollow white for up, solid red for down (per explicit request).
+const series = chart.addCandlestickSeries({
+  upColor: '#ffffff',
+  downColor: '#ef5350',
+  borderUpColor: '#131722',
+  borderDownColor: '#ef5350',
+  wickUpColor: '#131722',
+  wickDownColor: '#ef5350',
+});
+
+// EMA overlays, sharing the main price scale.
+const emaSeries = {
+  ema_10:  chart.addLineSeries({ color: '#2962ff', lineWidth: 1, priceLineVisible: false, lastValueVisible: false }),
+  ema_20:  chart.addLineSeries({ color: '#26a69a', lineWidth: 1, priceLineVisible: false, lastValueVisible: false }),
+  ema_50:  chart.addLineSeries({ color: '#ef5350', lineWidth: 1, priceLineVisible: false, lastValueVisible: false }),
+  ema_100: chart.addLineSeries({ color: '#787b86', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, priceLineVisible: false, lastValueVisible: false }),
+};
+
+// Turnover sub-panel, pinned to the bottom ~25% of the same chart via its
+// own price scale (the standard Lightweight Charts trick for a "volume
+// pane" without a second chart instance).
+const turnoverSeries = chart.addHistogramSeries({
+  priceFormat: { type: 'volume' },
+  priceScaleId: 'turnover',
+});
+chart.priceScale('turnover').applyOptions({ scaleMargins: { top: 0.75, bottom: 0 } });
+
+const turnoverEmaSeries = chart.addLineSeries({
+  color: '#5b8ff9',
+  lineWidth: 1,
+  lineStyle: LightweightCharts.LineStyle.Dashed,
+  priceScaleId: 'turnover',
+  priceLineVisible: false,
+  lastValueVisible: false,
+});
+
+const TIMEFRAME_META = {
+  m5:        { intraday: true,  label: '5-Minute' },
+  m15:       { intraday: true,  label: '15-Minute' },
+  hourly:    { intraday: true,  label: 'Hourly' },
+  daily:     { intraday: false, label: 'Daily' },
+  weekly:    { intraday: false, label: 'Weekly' },
+  monthly:   { intraday: false, label: 'Monthly' },
+  quarterly: { intraday: false, label: 'Quarterly' },
+};
+
+let currentTicker = 'HPQ';
+let currentTF = 'daily';
+let barsData = [];
+let markers = [];
+let priceLines = [];
+let watchlistData = [];
+
+function loadTimeframe(tf) {
+  const cfg = TIMEFRAME_META[tf];
+  const file = `${currentTicker.toLowerCase()}_${tf}.json`;
+  fetch(file)
+    .then(r => r.json())
+    .then(data => {
+      currentTF = tf;
+      barsData = data;
+
+      series.setData(data);
+      for (const key of Object.keys(emaSeries)) {
+        emaSeries[key].setData(data.filter(d => d[key] != null).map(d => ({ time: d.time, value: d[key] })));
+      }
+      turnoverSeries.setData(data.map(d => ({
+        time: d.time,
+        value: d.turnover,
+        color: d.close >= d.open ? 'rgba(38,166,154,0.45)' : 'rgba(239,83,80,0.45)',
+      })));
+      turnoverEmaSeries.setData(data.filter(d => d.turnover_ema_20 != null).map(d => ({ time: d.time, value: d.turnover_ema_20 })));
+
+      chart.applyOptions({ timeScale: { timeVisible: cfg.intraday, borderColor: '#e0e3eb' } });
+      chart.timeScale().fitContent();
+
+      const first = data[0], last = data[data.length - 1];
+      const change = last.close - first.close;
+      const pct = (change / first.close) * 100;
+      const changeClass = change >= 0 ? 'change-up' : 'change-down';
+      const sign = change >= 0 ? '+' : '';
+      document.getElementById('legend-headline').innerHTML =
+        `${currentTicker} · ${cfg.label} &nbsp; <span class="${changeClass}">${sign}${change.toFixed(2)} (${sign}${pct.toFixed(2)}%)</span>`;
+
+      markers = [];
+      series.setMarkers([]);
+      for (const pl of priceLines) series.removePriceLine(pl.lwcHandle);
+      priceLines = [];
+      updateOutputBox();
+
+      document.querySelectorAll('.tf-btn').forEach(b => b.classList.toggle('active', b.dataset.tf === tf));
+      setStatus(`Switched to ${cfg.label}. Drawings were cleared - this is a new resolution.`, false);
+    })
+    .catch(err => {
+      setStatus(`Could not load ${file} — make sure it's in the same folder as this HTML file.`, true);
+    });
+}
+
+function switchTicker(ticker) {
+  currentTicker = ticker;
+  document.querySelectorAll('.watch-row').forEach(row => row.classList.toggle('active', row.dataset.ticker === ticker));
+  const stock = watchlistData.find(s => s.ticker === ticker);
+  if (stock) {
+    document.getElementById('header-symbol').innerHTML = `${stock.ticker} <span class="name">${stock.name}</span>`;
+  }
+  loadTimeframe(currentTF);
+}
+
+function renderWatchlist() {
+  const container = document.getElementById('watchlist-rows');
+  container.innerHTML = '';
+  for (const stock of watchlistData) {
+    const row = document.createElement('div');
+    row.className = 'watch-row' + (stock.ticker === currentTicker ? ' active' : '');
+    row.dataset.ticker = stock.ticker;
+    const changeClass = stock.change_pct >= 0 ? 'change-up' : 'change-down';
+    const sign = stock.change_pct >= 0 ? '+' : '';
+    row.innerHTML = `
+      <div class="row-top"><span class="ticker">${stock.ticker}</span><span class="last">$${stock.last.toFixed(2)}</span></div>
+      <div class="row-bottom"><span>${stock.sector}</span><span class="${changeClass}">${sign}${stock.change_pct.toFixed(2)}%</span></div>
+    `;
+    row.addEventListener('click', () => switchTicker(stock.ticker));
+    container.appendChild(row);
+  }
+}
+
+fetch('chart_watchlist.json')
+  .then(r => r.json())
+  .then(data => {
+    watchlistData = data;
+    renderWatchlist();
+  })
+  .catch(() => setStatus('Could not load chart_watchlist.json.', true));
+
+document.querySelectorAll('.tf-btn').forEach(btn => {
+  btn.addEventListener('click', () => loadTimeframe(btn.dataset.tf));
+});
+
+// Toggle individual EMA / turnover-EMA lines on and off from the legend.
+const toggleableSeries = { ...emaSeries, turnover_ema: turnoverEmaSeries };
+document.querySelectorAll('#legend .ind-row[data-series]').forEach(row => {
+  const key = row.dataset.series;
+  const checkbox = row.querySelector('input');
+  checkbox.addEventListener('change', () => {
+    toggleableSeries[key].applyOptions({ visible: checkbox.checked });
+    row.classList.toggle('off', !checkbox.checked);
+  });
+});
+
+function setStatus(msg, isError) {
+  const el = document.getElementById('status');
+  el.textContent = msg;
+  el.className = isError ? 'error' : 'ok';
+}
+
+function parseAttrs(rest) {
+  const attrs = {};
+  const re = /(\w+)=("(?:[^"\\]|\\.)*"|\S+)/g;
+  let m;
+  while ((m = re.exec(rest)) !== null) {
+    let val = m[2];
+    if (val.startsWith('"')) val = val.slice(1, -1);
+    attrs[m[1]] = val;
+  }
+  return attrs;
+}
+
+const shapeMap = { arrowUp: 'arrowUp', arrowDown: 'arrowDown', circle: 'circle' };
+const colorMap = { green: '#26a69a', red: '#ef5350', blue: '#2962ff' };
+
+function renderCommands() {
+  const raw = document.getElementById('input-box').value;
+  const lines = raw.split('\n').map(l => l.trim()).filter(Boolean);
+  if (lines.length === 0) {
+    setStatus('Nothing to draw — paste some commands first.', true);
+    return;
+  }
+
+  let addedMarkers = 0, addedLines = 0, errors = [];
+
+  for (const line of lines) {
+    const [cmd, ...restParts] = line.split(/\s+(.*)/s);
+    const rest = restParts.join(' ');
+    const attrs = parseAttrs(rest || '');
+
+    if (cmd === 'MARKER') {
+      if (!attrs.date) { errors.push(`MARKER missing date: "${line}"`); continue; }
+      markers.push({
+        time: attrs.date,
+        position: attrs.pos === 'below' ? 'belowBar' : 'aboveBar',
+        shape: shapeMap[attrs.shape] || 'circle',
+        color: colorMap[attrs.color] || '#2962ff',
+        text: attrs.text || '',
+        source: 'claude',
+      });
+      addedMarkers++;
+    } else if (cmd === 'LINE') {
+      if (!attrs.price) { errors.push(`LINE missing price: "${line}"`); continue; }
+      const handle = series.createPriceLine({
+        price: parseFloat(attrs.price),
+        color: colorMap[attrs.color] || '#2962ff',
+        lineWidth: 1,
+        lineStyle: LightweightCharts.LineStyle.Dashed,
+        axisLabelVisible: true,
+        title: attrs.label || '',
+      });
+      priceLines.push({ price: parseFloat(attrs.price), color: attrs.color || 'blue', label: attrs.label || '', lwcHandle: handle });
+      addedLines++;
+    } else {
+      errors.push(`Unknown command: "${line}"`);
+    }
+  }
+
+  series.setMarkers(markers.map(m => ({ time: m.time, position: m.position, shape: m.shape, color: m.color, text: m.text })));
+
+  if (errors.length) {
+    setStatus(`Drew ${addedMarkers} marker(s), ${addedLines} line(s). ${errors.length} line(s) had issues: ${errors.join(' | ')}`, true);
+  } else {
+    setStatus(`Drew ${addedMarkers} marker(s) and ${addedLines} line(s) successfully.`, false);
+  }
+  updateOutputBox();
+}
+
+function clearAll() {
+  markers = [];
+  series.setMarkers([]);
+  for (const pl of priceLines) series.removePriceLine(pl.lwcHandle);
+  priceLines = [];
+  document.getElementById('input-box').value = '';
+  setStatus('Chart cleared.', false);
+  updateOutputBox();
+}
+
+function updateOutputBox() {
+  const lines = [];
+  for (const m of markers) {
+    const pos = m.position === 'belowBar' ? 'below' : 'above';
+    const colorName = Object.keys(colorMap).find(k => colorMap[k] === m.color) || 'blue';
+    const shapeName = Object.keys(shapeMap).find(k => shapeMap[k] === m.shape) || 'circle';
+    const tag = m.source === 'user' ? ' [added by user on chart]' : '';
+    lines.push(`MARKER date=${m.time} pos=${pos} shape=${shapeName} color=${colorName} text="${m.text}"${tag}`);
+  }
+  for (const pl of priceLines) {
+    lines.push(`LINE price=${pl.price} color=${pl.color} label="${pl.label}"`);
+  }
+  document.getElementById('output-box').value = lines.length ? lines.join('\n') : '';
+}
+
+chart.subscribeClick(param => {
+  if (!param.time) return;
+  const bar = barsData.find(b => b.time === param.time);
+  if (!bar) return;
+  markers.push({
+    time: param.time,
+    position: 'aboveBar',
+    shape: 'circle',
+    color: '#2962ff',
+    text: `$${bar.close.toFixed(2)}`,
+    source: 'user',
+  });
+  series.setMarkers(markers.map(m => ({ time: m.time, position: m.position, shape: m.shape, color: m.color, text: m.text })));
+  updateOutputBox();
+  setStatus(`Marked ${param.time} on the chart.`, false);
+});
+
+document.getElementById('render-btn').addEventListener('click', renderCommands);
+document.getElementById('clear-btn').addEventListener('click', clearAll);
+document.getElementById('copy-btn').addEventListener('click', () => {
+  const box = document.getElementById('output-box');
+  box.select();
+  navigator.clipboard.writeText(box.value).then(() => setStatus('Copied to clipboard.', false));
+});
+
+window.addEventListener('resize', () => {
+  chart.applyOptions({ width: chartEl.clientWidth, height: chartEl.clientHeight });
+});
+
+loadTimeframe('daily');
+</script>
+</body>
+</html>

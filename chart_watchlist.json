@@ -1,0 +1,79 @@
+[
+  {
+    "ticker": "HPQ",
+    "name": "HP Inc.",
+    "sector": "Technology",
+    "last": 30.05,
+    "change_pct": 6.64
+  },
+  {
+    "ticker": "COHR",
+    "name": "Coherent Corp.",
+    "sector": "Technology",
+    "last": 379.13,
+    "change_pct": 13.44
+  },
+  {
+    "ticker": "ABNB",
+    "name": "Airbnb, Inc.",
+    "sector": "Consumer Cyclical",
+    "last": 178.07,
+    "change_pct": 17.43
+  },
+  {
+    "ticker": "RKLB",
+    "name": "Rocket Lab Corporation",
+    "sector": "Industrials",
+    "last": 82.83,
+    "change_pct": 9.46
+  },
+  {
+    "ticker": "IREN",
+    "name": "IREN Limited",
+    "sector": "Financial Services",
+    "last": 41.23,
+    "change_pct": 8.7
+  },
+  {
+    "ticker": "NTRA",
+    "name": "Natera, Inc.",
+    "sector": "Healthcare",
+    "last": 322.1,
+    "change_pct": 21.37
+  },
+  {
+    "ticker": "NEM",
+    "name": "Newmont Corporation",
+    "sector": "Basic Materials",
+    "last": 112.98,
+    "change_pct": 7.16
+  },
+  {
+    "ticker": "TTWO",
+    "name": "Take-Two Interactive Software, Inc.",
+    "sector": "Communication Services",
+    "last": 246.5,
+    "change_pct": 6.04
+  },
+  {
+    "ticker": "KGS",
+    "name": "Kodiak Gas Services, Inc.",
+    "sector": "Energy",
+    "last": 59.9,
+    "change_pct": 5.35
+  },
+  {
+    "ticker": "CVSA",
+    "name": "Covista Inc.",
+    "sector": "Consumer Defensive",
+    "last": 140.98,
+    "change_pct": 13.46
+  },
+  {
+    "ticker": "RMAX",
+    "name": "RE/MAX Holdings, Inc.",
+    "sector": "Real Estate",
+    "last": 11.37,
+    "change_pct": 5.57
+  }
+]

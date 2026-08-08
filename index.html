@@ -17,6 +17,7 @@
     --accent: #2962ff;
     --accent-hover: #1e53e5;
     --mono: 'SF Mono', 'Consolas', 'Menlo', monospace;
+    --panel-offset: 20%;
   }
   * { box-sizing: border-box; }
   html, body {
@@ -157,7 +158,7 @@
   }
   #turnover-box {
     position: absolute;
-    bottom: 28px;
+    bottom: calc(var(--panel-offset) + 28px);
     left: 0;
     z-index: 5;
     font-size: 11px;
@@ -222,7 +223,7 @@
   }
   .earnings-badge {
     position: absolute;
-    bottom: 38px;
+    bottom: calc(var(--panel-offset) + 38px);
     width: 15px;
     height: 15px;
     background: #ff9800;
@@ -352,6 +353,7 @@
       <label class="ind-row" data-series="earnings"><input type="checkbox" checked><span class="swatch" style="width:9px;height:9px;background:#ff9800;clip-path:polygon(50% 0%,100% 38%,100% 100%,0% 100%,0% 38%);"></span>Earnings (daily+ only)</label>
       <label class="ind-row" data-series="turnover" style="margin-top:4px;"><input type="checkbox" checked>Volume (bars, red/teal by direction)</label>
       <label class="ind-row" data-series="turnover_ema"><input type="checkbox" checked><span class="swatch dashed" style="border-color:#5b8ff9"></span>Volume EMA 20</label>
+      <label class="ind-row" data-series="rsi" style="margin-top:4px;"><input type="checkbox" checked><span class="swatch" style="background:#131722"></span>RSI (14)</label>
     </div>
     <div id="turnover-box">
       <div class="row"><span class="label">LT</span><span class="value" id="turnover-lt">—</span></div>
@@ -469,14 +471,17 @@ function calculateEMA(bars, period, field = 'close') {
   });
 }
 
-// Turnover sub-panel, pinned to the bottom ~25% of the same chart via its
-// own price scale (the standard Lightweight Charts trick for a "volume
-// pane" without a second chart instance).
+// Layout: three stacked panels sharing one chart canvas, each with its
+// own price scale and scaleMargins - price chart on top (~55%), volume
+// in the middle (~20%), RSI at the bottom (~20%), with small gaps.
+chart.priceScale('right').applyOptions({ scaleMargins: { top: 0.05, bottom: 0.42 } });
+
+// Turnover sub-panel - the middle band.
 const turnoverSeries = chart.addHistogramSeries({
   priceFormat: { type: 'volume' },
   priceScaleId: 'turnover',
 });
-chart.priceScale('turnover').applyOptions({ scaleMargins: { top: 0.75, bottom: 0 } });
+chart.priceScale('turnover').applyOptions({ scaleMargins: { top: 0.60, bottom: 0.20 } });
 
 const turnoverEmaSeries = chart.addLineSeries({
   color: '#5b8ff9',
@@ -487,6 +492,45 @@ const turnoverEmaSeries = chart.addLineSeries({
   lastValueVisible: false,
   crosshairMarkerVisible: false,
 });
+
+// RSI sub-panel - the bottom band. Standard 14-period Wilder's RSI,
+// calculated client-side from close prices (not in the exported data
+// files). Two dashed reference lines at 40/60 mark the neutral zone,
+// matching your TradingView setup.
+const rsiSeries = chart.addLineSeries({
+  color: '#131722',
+  lineWidth: 1,
+  priceScaleId: 'rsi',
+  priceLineVisible: false,
+  lastValueVisible: false,
+  crosshairMarkerVisible: false,
+  autoscaleInfoProvider: () => ({ priceRange: { minValue: 0, maxValue: 100 } }),
+});
+chart.priceScale('rsi').applyOptions({ scaleMargins: { top: 0.80, bottom: 0.02 } });
+rsiSeries.createPriceLine({ price: 60, color: '#c0c4cc', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, axisLabelVisible: true, title: '' });
+rsiSeries.createPriceLine({ price: 40, color: '#c0c4cc', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, axisLabelVisible: true, title: '' });
+
+function calculateRSI(bars, period = 14) {
+  const out = [];
+  let avgGain = null, avgLoss = null;
+  for (let i = 0; i < bars.length; i++) {
+    if (i === 0) continue;
+    const change = bars[i].close - bars[i - 1].close;
+    const gain = Math.max(change, 0);
+    const loss = Math.max(-change, 0);
+    if (avgGain === null) {
+      avgGain = gain;
+      avgLoss = loss;
+    } else {
+      avgGain = (avgGain * (period - 1) + gain) / period;
+      avgLoss = (avgLoss * (period - 1) + loss) / period;
+    }
+    const rs = avgLoss === 0 ? 100 : avgGain / avgLoss;
+    const rsi = avgLoss === 0 ? 100 : 100 - 100 / (1 + rs);
+    out.push({ time: bars[i].time, value: rsi });
+  }
+  return out;
+}
 
 const TIMEFRAME_META = {
   m5:        { intraday: true,  label: '5-Minute' },
@@ -636,6 +680,7 @@ function loadTimeframe(tf) {
       currentVolumeEma3 = calculateEMA(data, 3, 'volume');
       currentVolumeEma20 = calculateEMA(data, 20, 'volume');
       turnoverEmaSeries.setData(currentVolumeEma20);
+      rsiSeries.setData(calculateRSI(data, 14));
 
       chart.applyOptions({ timeScale: { timeVisible: cfg.intraday, borderColor: '#e0e3eb' } });
       chart.timeScale().fitContent();
@@ -736,12 +781,45 @@ document.querySelectorAll('#legend .ind-row[data-series]').forEach(row => {
     if (key === 'earnings') {
       earningsVisible = checkbox.checked;
       renderEarningsOverlay();
+    } else if (key === 'rsi') {
+      setRsiEnabled(checkbox.checked);
     } else {
       toggleableSeries[key].applyOptions({ visible: checkbox.checked });
     }
     row.classList.toggle('off', !checkbox.checked);
   });
 });
+
+// RSI is a whole extra PANEL, not just a line - unlike the other
+// checkboxes, unchecking it needs to collapse its reserved space
+// entirely and let the price chart and volume panel expand back into
+// it, rather than just hiding the RSI line within a still-reserved
+// blank area.
+let rsiEnabled = true;
+const LAYOUT_WITH_RSI = {
+  price: { top: 0.05, bottom: 0.42 },
+  turnover: { top: 0.60, bottom: 0.20 },
+};
+const LAYOUT_WITHOUT_RSI = {
+  price: { top: 0.05, bottom: 0.22 },
+  turnover: { top: 0.75, bottom: 0 },
+};
+
+function setRsiEnabled(enabled) {
+  rsiEnabled = enabled;
+  const layout = enabled ? LAYOUT_WITH_RSI : LAYOUT_WITHOUT_RSI;
+  chart.priceScale('right').applyOptions({ scaleMargins: layout.price });
+  chart.priceScale('turnover').applyOptions({ scaleMargins: layout.turnover });
+  chart.priceScale('rsi').applyOptions({ visible: enabled });
+  rsiSeries.applyOptions({ visible: enabled });
+  // The turnover box and earnings badges are positioned relative to
+  // where the volume panel's own bottom boundary sits - that boundary
+  // moves depending on whether RSI's space is reserved or not, so this
+  // CSS variable (referenced in both elements' `bottom` calc()) is how
+  // they stay correctly anchored either way.
+  document.documentElement.style.setProperty('--panel-offset', enabled ? '20%' : '0%');
+  renderEarningsOverlay();
+}
 
 function setStatus(msg, isError) {
   const el = document.getElementById('status');

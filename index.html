@@ -386,7 +386,7 @@
 
     <div class="sidebar-section">
       <div class="sidebar-title">Chart State (copy to Claude)</div>
-      <div class="hint">Click any candle to mark it and add it here automatically.</div>
+      <div class="hint">Reflects whatever's currently drawn on the chart.</div>
       <textarea id="output-box" readonly placeholder="Nothing on the chart yet."></textarea>
       <div class="actions">
         <button id="copy-btn">Copy to clipboard</button>
@@ -852,23 +852,6 @@ chart.subscribeCrosshairMove(param => {
   }
   const index = barsData.findIndex(b => b.time === param.time);
   if (index !== -1) updateTurnoverBox(index);
-});
-
-chart.subscribeClick(param => {
-  if (!param.time) return;
-  const bar = barsData.find(b => b.time === param.time);
-  if (!bar) return;
-  markers.push({
-    time: param.time,
-    position: 'aboveBar',
-    shape: 'circle',
-    color: '#2962ff',
-    text: `$${bar.close.toFixed(2)}`,
-    source: 'user',
-  });
-  refreshMarkers();
-  updateOutputBox();
-  setStatus(`Marked ${param.time} on the chart.`, false);
 });
 
 document.getElementById('render-btn').addEventListener('click', renderCommands);

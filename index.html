@@ -157,17 +157,22 @@
   }
   #turnover-box {
     position: absolute;
-    bottom: 10px;
+    bottom: 14px;
     left: 12px;
     z-index: 5;
     font-size: 11px;
     line-height: 1.7;
     color: var(--text-dim);
     user-select: none;
+    background: #ffffff;
+    border: 1px solid var(--panel-border);
+    border-radius: 4px;
+    padding: 6px 10px;
   }
   #turnover-box .row {
     display: flex;
-    gap: 6px;
+    justify-content: space-between;
+    gap: 14px;
   }
   #turnover-box .label { min-width: 46px; }
   #turnover-box .value {
@@ -285,9 +290,10 @@
       <label class="ind-row" data-series="ema_10"><input type="checkbox" checked><span class="swatch" style="background:#000000"></span>EMA 10</label>
       <label class="ind-row" data-series="ema_20"><input type="checkbox" checked><span class="swatch" style="background:#2962ff"></span>EMA 20</label>
       <label class="ind-row" data-series="ema_50"><input type="checkbox" checked><span class="swatch" style="background:#26a69a"></span>EMA 50</label>
-      <label class="ind-row" data-series="ema_100"><input type="checkbox" checked><span class="swatch dashed" style="border-color:#787b86"></span>EMA 100</label>
       <label class="ind-row" data-series="ema_200"><input type="checkbox" checked><span class="swatch" style="background:#ef5350"></span>EMA 200</label>
-      <div class="ind-row" style="margin-top:4px; cursor:default;">Turnover (bars, red/teal by direction)</div>
+      <label class="ind-row" data-series="ema_cross"><input type="checkbox" checked><span class="swatch" style="background:#ff9800;width:7px;height:7px;border-radius:50%;"></span>10/20 EMA cross</label>
+      <label class="ind-row" data-series="earnings"><input type="checkbox" checked><span class="swatch" style="background:#009688;width:7px;height:7px;"></span>Earnings (daily+ only)</label>
+      <label class="ind-row" data-series="turnover" style="margin-top:4px;"><input type="checkbox" checked>Turnover (bars, red/teal by direction)</label>
       <label class="ind-row" data-series="turnover_ema"><input type="checkbox" checked><span class="swatch dashed" style="border-color:#5b8ff9"></span>Turnover EMA 20</label>
     </div>
     <div id="turnover-box">
@@ -358,9 +364,45 @@ const emaSeries = {
   ema_10:  chart.addLineSeries({ color: '#000000', lineWidth: 1, priceLineVisible: false, lastValueVisible: false }),
   ema_20:  chart.addLineSeries({ color: '#2962ff', lineWidth: 1, priceLineVisible: false, lastValueVisible: false }),
   ema_50:  chart.addLineSeries({ color: '#26a69a', lineWidth: 1, priceLineVisible: false, lastValueVisible: false }),
-  ema_100: chart.addLineSeries({ color: '#787b86', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, priceLineVisible: false, lastValueVisible: false }),
   ema_200: chart.addLineSeries({ color: '#ef5350', lineWidth: 1, priceLineVisible: false, lastValueVisible: false }),
 };
+
+// Dedicated, fully transparent series that ONLY exists to host the EMA
+// 10/20 crossover dots. Kept separate from the actual EMA 10/20 lines so
+// its visibility (and checkbox) is independent - the dots are an event
+// indicator in their own right, not a decoration on the EMA 10 line.
+const crossoverSeries = chart.addLineSeries({
+  color: 'rgba(0,0,0,0)',
+  lineWidth: 1,
+  priceLineVisible: false,
+  lastValueVisible: false,
+  crosshairMarkerVisible: false,
+});
+
+// Same trick again for earnings markers - an invisible line series that
+// only exists to host "E" badge markers above each bar. TradingView's
+// house-shaped "E" icon isn't a shape Lightweight Charts can draw
+// natively; this uses a labeled square badge instead (teal for past
+// earnings, magenta for the next upcoming one) as the closest practical
+// equivalent.
+const earningsSeries = chart.addLineSeries({
+  color: 'rgba(0,0,0,0)',
+  lineWidth: 1,
+  priceLineVisible: false,
+  lastValueVisible: false,
+  crosshairMarkerVisible: false,
+});
+let earningsData = {};
+
+fetch('chart_earnings.json')
+  .then(r => r.json())
+  .then(data => {
+    earningsData = data;
+    if (barsData.length) {
+      earningsSeries.setMarkers(computeEarningsMarkers(barsData, TIMEFRAME_META[currentTF].intraday));
+    }
+  })
+  .catch(() => setStatus('Could not load chart_earnings.json.', true));
 
 // EMA 200 isn't in the exported data files (only 10/20/50/100 were
 // pre-computed) - calculated here instead, directly from each bar's
@@ -423,7 +465,10 @@ function formatTurnover(value) {
 
 // A dot wherever the 10 EMA crosses the 20 EMA (either direction) -
 // computed straight from the ema_10/ema_20 values already in the data,
-// same crossover logic used in the original Python pipeline.
+// same crossover logic used in the original Python pipeline. Applied
+// directly to the EMA 10 line series (not the candlestick series), so
+// the dot renders precisely on the line's actual value at that point,
+// not just "somewhere within that bar."
 function computeCrossoverMarkers(data) {
   const out = [];
   for (let i = 1; i < data.length; i++) {
@@ -433,20 +478,44 @@ function computeCrossoverMarkers(data) {
     const crossedUp = prev10 <= prev20 && cur10 > cur20;
     const crossedDown = prev10 >= prev20 && cur10 < cur20;
     if (crossedUp || crossedDown) {
-      out.push({ time: data[i].time, position: 'inBar', shape: 'circle', color: '#000000', text: '' });
+      out.push({ time: data[i].time, position: 'inBar', shape: 'circle', color: '#ff9800', text: '' });
     }
   }
   return out;
 }
 
-// Combines the automatic crossover dots with the user/Claude-added
-// markers, sorted by time (required by Lightweight Charts), and applies
-// them to the chart. Crossover dots are NOT affected by "Clear all" -
-// they're a chart indicator, not a manual annotation.
+// Manual (user/Claude-added) markers stay on the candlestick series,
+// since aboveBar/belowBar positioning is meant relative to a candle.
+// Crossover dots live separately on the EMA 10 line - see above.
 function refreshMarkers() {
   const manual = markers.map(m => ({ time: m.time, position: m.position, shape: m.shape, color: m.color, text: m.text }));
-  const combined = [...crossoverMarkers, ...manual].sort((a, b) => (a.time > b.time ? 1 : a.time < b.time ? -1 : 0));
-  series.setMarkers(combined);
+  series.setMarkers(manual);
+}
+
+// Matches each earnings date to the bar it falls within (exact match
+// for daily bars, nearest prior bar for weekly/monthly/quarterly since
+// those bars span a whole period rather than a single day). Only shown
+// on daily-and-above timeframes - not intraday, where "which bar"
+// stops being a meaningful question for a single earnings date.
+function computeEarningsMarkers(data, isIntraday) {
+  const entries = earningsData[currentTicker];
+  if (isIntraday || !entries) return [];
+  const out = [];
+  for (const e of entries) {
+    let barTime = null;
+    for (let i = data.length - 1; i >= 0; i--) {
+      if (data[i].time <= e.date) { barTime = data[i].time; break; }
+    }
+    if (barTime === null) continue;
+    out.push({
+      time: barTime,
+      position: 'aboveBar',
+      shape: 'square',
+      color: e.is_future ? '#e91e63' : '#009688',
+      text: 'E',
+    });
+  }
+  return out;
 }
 
 function loadTimeframe(tf) {
@@ -488,6 +557,10 @@ function loadTimeframe(tf) {
 
       markers = [];
       crossoverMarkers = computeCrossoverMarkers(data);
+      crossoverSeries.setData(data.filter(d => d.ema_10 != null).map(d => ({ time: d.time, value: d.ema_10 })));
+      crossoverSeries.setMarkers(crossoverMarkers);
+      earningsSeries.setData(data.map(d => ({ time: d.time, value: d.close })));
+      earningsSeries.setMarkers(computeEarningsMarkers(data, cfg.intraday));
       refreshMarkers();
       for (const pl of priceLines) series.removePriceLine(pl.lwcHandle);
       priceLines = [];
@@ -542,7 +615,7 @@ document.querySelectorAll('.tf-btn').forEach(btn => {
 });
 
 // Toggle individual EMA / turnover-EMA lines on and off from the legend.
-const toggleableSeries = { ...emaSeries, turnover_ema: turnoverEmaSeries };
+const toggleableSeries = { ...emaSeries, ema_cross: crossoverSeries, earnings: earningsSeries, turnover: turnoverSeries, turnover_ema: turnoverEmaSeries };
 document.querySelectorAll('#legend .ind-row[data-series]').forEach(row => {
   const key = row.dataset.series;
   const checkbox = row.querySelector('input');

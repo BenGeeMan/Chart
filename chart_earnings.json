@@ -1,0 +1,596 @@
+{
+  "HPQ": [
+    {
+      "date": "2023-08-29",
+      "is_future": false
+    },
+    {
+      "date": "2023-11-21",
+      "is_future": false
+    },
+    {
+      "date": "2024-02-28",
+      "is_future": false
+    },
+    {
+      "date": "2024-05-29",
+      "is_future": false
+    },
+    {
+      "date": "2024-08-28",
+      "is_future": false
+    },
+    {
+      "date": "2024-11-26",
+      "is_future": false
+    },
+    {
+      "date": "2025-02-27",
+      "is_future": false
+    },
+    {
+      "date": "2025-05-28",
+      "is_future": false
+    },
+    {
+      "date": "2025-08-27",
+      "is_future": false
+    },
+    {
+      "date": "2025-11-25",
+      "is_future": false
+    },
+    {
+      "date": "2026-02-24",
+      "is_future": false
+    },
+    {
+      "date": "2026-05-27",
+      "is_future": false
+    },
+    {
+      "date": "2026-08-26",
+      "is_future": true
+    }
+  ],
+  "COHR": [
+    {
+      "date": "2023-08-16",
+      "is_future": false
+    },
+    {
+      "date": "2023-11-07",
+      "is_future": false
+    },
+    {
+      "date": "2024-02-05",
+      "is_future": false
+    },
+    {
+      "date": "2024-05-07",
+      "is_future": false
+    },
+    {
+      "date": "2024-08-15",
+      "is_future": false
+    },
+    {
+      "date": "2024-11-06",
+      "is_future": false
+    },
+    {
+      "date": "2025-02-05",
+      "is_future": false
+    },
+    {
+      "date": "2025-05-07",
+      "is_future": false
+    },
+    {
+      "date": "2025-08-13",
+      "is_future": false
+    },
+    {
+      "date": "2025-11-05",
+      "is_future": false
+    },
+    {
+      "date": "2026-02-04",
+      "is_future": false
+    },
+    {
+      "date": "2026-05-06",
+      "is_future": false
+    },
+    {
+      "date": "2026-08-12",
+      "is_future": true
+    }
+  ],
+  "ABNB": [
+    {
+      "date": "2023-11-01",
+      "is_future": false
+    },
+    {
+      "date": "2024-02-13",
+      "is_future": false
+    },
+    {
+      "date": "2024-05-08",
+      "is_future": false
+    },
+    {
+      "date": "2024-08-06",
+      "is_future": false
+    },
+    {
+      "date": "2024-11-07",
+      "is_future": false
+    },
+    {
+      "date": "2025-02-13",
+      "is_future": false
+    },
+    {
+      "date": "2025-05-01",
+      "is_future": false
+    },
+    {
+      "date": "2025-08-06",
+      "is_future": false
+    },
+    {
+      "date": "2025-11-06",
+      "is_future": false
+    },
+    {
+      "date": "2026-02-12",
+      "is_future": false
+    },
+    {
+      "date": "2026-05-07",
+      "is_future": false
+    },
+    {
+      "date": "2026-08-06",
+      "is_future": false
+    },
+    {
+      "date": "2026-11-05",
+      "is_future": true
+    }
+  ],
+  "RKLB": [
+    {
+      "date": "2023-08-08",
+      "is_future": false
+    },
+    {
+      "date": "2023-11-08",
+      "is_future": false
+    },
+    {
+      "date": "2024-02-27",
+      "is_future": false
+    },
+    {
+      "date": "2024-05-06",
+      "is_future": false
+    },
+    {
+      "date": "2024-08-08",
+      "is_future": false
+    },
+    {
+      "date": "2024-11-12",
+      "is_future": false
+    },
+    {
+      "date": "2025-02-27",
+      "is_future": false
+    },
+    {
+      "date": "2025-05-08",
+      "is_future": false
+    },
+    {
+      "date": "2025-08-07",
+      "is_future": false
+    },
+    {
+      "date": "2025-11-10",
+      "is_future": false
+    },
+    {
+      "date": "2026-02-26",
+      "is_future": false
+    },
+    {
+      "date": "2026-05-07",
+      "is_future": false
+    },
+    {
+      "date": "2026-08-10",
+      "is_future": true
+    }
+  ],
+  "IREN": [
+    {
+      "date": "2024-02-15",
+      "is_future": false
+    },
+    {
+      "date": "2024-05-15",
+      "is_future": true
+    },
+    {
+      "date": "2024-08-28",
+      "is_future": false
+    },
+    {
+      "date": "2024-11-26",
+      "is_future": false
+    },
+    {
+      "date": "2025-02-12",
+      "is_future": false
+    },
+    {
+      "date": "2025-05-14",
+      "is_future": false
+    },
+    {
+      "date": "2025-08-28",
+      "is_future": false
+    },
+    {
+      "date": "2025-11-06",
+      "is_future": false
+    },
+    {
+      "date": "2026-02-05",
+      "is_future": false
+    },
+    {
+      "date": "2026-05-08",
+      "is_future": false
+    },
+    {
+      "date": "2026-08-27",
+      "is_future": true
+    }
+  ],
+  "NTRA": [
+    {
+      "date": "2023-11-08",
+      "is_future": false
+    },
+    {
+      "date": "2024-02-28",
+      "is_future": false
+    },
+    {
+      "date": "2024-05-10",
+      "is_future": false
+    },
+    {
+      "date": "2024-08-08",
+      "is_future": false
+    },
+    {
+      "date": "2024-11-12",
+      "is_future": false
+    },
+    {
+      "date": "2025-02-27",
+      "is_future": false
+    },
+    {
+      "date": "2025-05-08",
+      "is_future": false
+    },
+    {
+      "date": "2025-08-07",
+      "is_future": false
+    },
+    {
+      "date": "2025-11-06",
+      "is_future": false
+    },
+    {
+      "date": "2026-02-26",
+      "is_future": false
+    },
+    {
+      "date": "2026-05-07",
+      "is_future": false
+    },
+    {
+      "date": "2026-08-06",
+      "is_future": false
+    },
+    {
+      "date": "2026-11-05",
+      "is_future": true
+    }
+  ],
+  "NEM": [
+    {
+      "date": "2023-10-26",
+      "is_future": false
+    },
+    {
+      "date": "2024-02-22",
+      "is_future": false
+    },
+    {
+      "date": "2024-04-25",
+      "is_future": false
+    },
+    {
+      "date": "2024-07-24",
+      "is_future": false
+    },
+    {
+      "date": "2024-10-23",
+      "is_future": false
+    },
+    {
+      "date": "2025-02-20",
+      "is_future": false
+    },
+    {
+      "date": "2025-04-23",
+      "is_future": false
+    },
+    {
+      "date": "2025-07-24",
+      "is_future": false
+    },
+    {
+      "date": "2025-10-23",
+      "is_future": false
+    },
+    {
+      "date": "2026-02-19",
+      "is_future": false
+    },
+    {
+      "date": "2026-04-23",
+      "is_future": false
+    },
+    {
+      "date": "2026-07-23",
+      "is_future": false
+    },
+    {
+      "date": "2026-10-22",
+      "is_future": true
+    }
+  ],
+  "TTWO": [
+    {
+      "date": "2023-08-08",
+      "is_future": false
+    },
+    {
+      "date": "2023-11-08",
+      "is_future": false
+    },
+    {
+      "date": "2024-02-08",
+      "is_future": false
+    },
+    {
+      "date": "2024-05-16",
+      "is_future": false
+    },
+    {
+      "date": "2024-08-08",
+      "is_future": false
+    },
+    {
+      "date": "2024-11-06",
+      "is_future": false
+    },
+    {
+      "date": "2025-02-06",
+      "is_future": false
+    },
+    {
+      "date": "2025-05-15",
+      "is_future": false
+    },
+    {
+      "date": "2025-08-07",
+      "is_future": false
+    },
+    {
+      "date": "2025-11-06",
+      "is_future": false
+    },
+    {
+      "date": "2026-02-03",
+      "is_future": false
+    },
+    {
+      "date": "2026-05-21",
+      "is_future": false
+    },
+    {
+      "date": "2026-08-07",
+      "is_future": false
+    }
+  ],
+  "KGS": [
+    {
+      "date": "2023-08-09",
+      "is_future": false
+    },
+    {
+      "date": "2023-11-08",
+      "is_future": false
+    },
+    {
+      "date": "2024-03-06",
+      "is_future": false
+    },
+    {
+      "date": "2024-05-08",
+      "is_future": false
+    },
+    {
+      "date": "2024-08-12",
+      "is_future": false
+    },
+    {
+      "date": "2024-11-07",
+      "is_future": false
+    },
+    {
+      "date": "2025-03-05",
+      "is_future": false
+    },
+    {
+      "date": "2025-05-07",
+      "is_future": false
+    },
+    {
+      "date": "2025-08-06",
+      "is_future": false
+    },
+    {
+      "date": "2025-11-04",
+      "is_future": false
+    },
+    {
+      "date": "2026-02-25",
+      "is_future": false
+    },
+    {
+      "date": "2026-05-11",
+      "is_future": false
+    },
+    {
+      "date": "2026-08-06",
+      "is_future": false
+    },
+    {
+      "date": "2026-11-03",
+      "is_future": true
+    }
+  ],
+  "CVSA": [
+    {
+      "date": "2023-08-10",
+      "is_future": false
+    },
+    {
+      "date": "2023-10-26",
+      "is_future": false
+    },
+    {
+      "date": "2024-01-30",
+      "is_future": false
+    },
+    {
+      "date": "2024-05-02",
+      "is_future": false
+    },
+    {
+      "date": "2024-08-06",
+      "is_future": false
+    },
+    {
+      "date": "2024-10-29",
+      "is_future": false
+    },
+    {
+      "date": "2025-01-30",
+      "is_future": false
+    },
+    {
+      "date": "2025-05-08",
+      "is_future": false
+    },
+    {
+      "date": "2025-08-07",
+      "is_future": false
+    },
+    {
+      "date": "2025-10-30",
+      "is_future": false
+    },
+    {
+      "date": "2026-01-28",
+      "is_future": false
+    },
+    {
+      "date": "2026-05-07",
+      "is_future": false
+    },
+    {
+      "date": "2026-08-06",
+      "is_future": false
+    },
+    {
+      "date": "2026-10-29",
+      "is_future": true
+    }
+  ],
+  "RMAX": [
+    {
+      "date": "2023-11-02",
+      "is_future": false
+    },
+    {
+      "date": "2024-02-22",
+      "is_future": false
+    },
+    {
+      "date": "2024-05-02",
+      "is_future": false
+    },
+    {
+      "date": "2024-08-08",
+      "is_future": false
+    },
+    {
+      "date": "2024-10-31",
+      "is_future": false
+    },
+    {
+      "date": "2025-02-20",
+      "is_future": false
+    },
+    {
+      "date": "2025-05-01",
+      "is_future": false
+    },
+    {
+      "date": "2025-07-29",
+      "is_future": false
+    },
+    {
+      "date": "2025-10-30",
+      "is_future": false
+    },
+    {
+      "date": "2026-02-19",
+      "is_future": false
+    },
+    {
+      "date": "2026-05-08",
+      "is_future": false
+    },
+    {
+      "date": "2026-08-06",
+      "is_future": false
+    },
+    {
+      "date": "2026-11-05",
+      "is_future": true
+    }
+  ]
+}

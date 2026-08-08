@@ -17,7 +17,7 @@
     --accent: #2962ff;
     --accent-hover: #1e53e5;
     --mono: 'SF Mono', 'Consolas', 'Menlo', monospace;
-    --panel-offset: 20%;
+    --panel-offset: 24%;
   }
   * { box-sizing: border-box; }
   html, body {
@@ -474,14 +474,14 @@ function calculateEMA(bars, period, field = 'close') {
 // Layout: three stacked panels sharing one chart canvas, each with its
 // own price scale and scaleMargins - price chart on top (~55%), volume
 // in the middle (~20%), RSI at the bottom (~20%), with small gaps.
-chart.priceScale('right').applyOptions({ scaleMargins: { top: 0.05, bottom: 0.42 } });
+chart.priceScale('right').applyOptions({ scaleMargins: { top: 0.05, bottom: 0.45 } });
 
 // Turnover sub-panel - the middle band.
 const turnoverSeries = chart.addHistogramSeries({
   priceFormat: { type: 'volume' },
   priceScaleId: 'turnover',
 });
-chart.priceScale('turnover').applyOptions({ scaleMargins: { top: 0.60, bottom: 0.20 } });
+chart.priceScale('turnover').applyOptions({ scaleMargins: { top: 0.58, bottom: 0.24 } });
 
 const turnoverEmaSeries = chart.addLineSeries({
   color: '#5b8ff9',
@@ -506,7 +506,7 @@ const rsiSeries = chart.addLineSeries({
   crosshairMarkerVisible: false,
   autoscaleInfoProvider: () => ({ priceRange: { minValue: 0, maxValue: 100 } }),
 });
-chart.priceScale('rsi').applyOptions({ scaleMargins: { top: 0.80, bottom: 0.02 } });
+chart.priceScale('rsi').applyOptions({ scaleMargins: { top: 0.83, bottom: 0.02 } });
 rsiSeries.createPriceLine({ price: 60, color: '#c0c4cc', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, axisLabelVisible: true, title: '' });
 rsiSeries.createPriceLine({ price: 40, color: '#c0c4cc', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, axisLabelVisible: true, title: '' });
 
@@ -797,12 +797,12 @@ document.querySelectorAll('#legend .ind-row[data-series]').forEach(row => {
 // blank area.
 let rsiEnabled = true;
 const LAYOUT_WITH_RSI = {
-  price: { top: 0.05, bottom: 0.42 },
-  turnover: { top: 0.60, bottom: 0.20 },
+  price: { top: 0.05, bottom: 0.45 },
+  turnover: { top: 0.58, bottom: 0.24 },
 };
 const LAYOUT_WITHOUT_RSI = {
-  price: { top: 0.05, bottom: 0.22 },
-  turnover: { top: 0.75, bottom: 0 },
+  price: { top: 0.05, bottom: 0.25 },
+  turnover: { top: 0.78, bottom: 0 },
 };
 
 function setRsiEnabled(enabled) {
@@ -817,7 +817,7 @@ function setRsiEnabled(enabled) {
   // moves depending on whether RSI's space is reserved or not, so this
   // CSS variable (referenced in both elements' `bottom` calc()) is how
   // they stay correctly anchored either way.
-  document.documentElement.style.setProperty('--panel-offset', enabled ? '20%' : '0%');
+  document.documentElement.style.setProperty('--panel-offset', enabled ? '24%' : '0%');
   renderEarningsOverlay();
 }
 

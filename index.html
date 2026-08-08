@@ -180,6 +180,39 @@
     color: var(--text);
     font-weight: 600;
   }
+  #turnover-box-daily {
+    position: absolute;
+    top: 10px;
+    right: 12px;
+    z-index: 5;
+    font-size: 11px;
+    line-height: 1.7;
+    color: var(--text-dim);
+    user-select: none;
+    background: #ffffff;
+    border: 1px solid var(--panel-border);
+    border-radius: 4px;
+    padding: 6px 10px;
+  }
+  #turnover-box-daily .ind-title {
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    margin-bottom: 2px;
+  }
+  #turnover-box-daily .row {
+    display: flex;
+    justify-content: space-between;
+    gap: 14px;
+  }
+  #turnover-box-daily .label { min-width: 46px; }
+  #turnover-box-daily .value {
+    font-family: var(--mono);
+    color: var(--text);
+    font-weight: 600;
+  }
 
   #sidebar {
     background: var(--panel);
@@ -292,7 +325,7 @@
       <label class="ind-row" data-series="ema_50"><input type="checkbox" checked><span class="swatch" style="background:#26a69a"></span>EMA 50</label>
       <label class="ind-row" data-series="ema_200"><input type="checkbox" checked><span class="swatch" style="background:#ef5350"></span>EMA 200</label>
       <label class="ind-row" data-series="ema_cross"><input type="checkbox" checked><span class="swatch" style="background:#ff9800;width:7px;height:7px;border-radius:50%;"></span>10/20 EMA cross</label>
-      <label class="ind-row" data-series="earnings"><input type="checkbox" checked><span class="swatch" style="background:#009688;width:7px;height:7px;"></span>Earnings (daily+ only)</label>
+      <label class="ind-row" data-series="earnings"><input type="checkbox" checked><span class="swatch" style="background:#ff9800;width:7px;height:7px;border-radius:50%;"></span>Earnings (daily+ only)</label>
       <label class="ind-row" data-series="turnover" style="margin-top:4px;"><input type="checkbox" checked>Volume (bars, red/teal by direction)</label>
       <label class="ind-row" data-series="turnover_ema"><input type="checkbox" checked><span class="swatch dashed" style="border-color:#5b8ff9"></span>Volume EMA 20</label>
     </div>
@@ -300,6 +333,12 @@
       <div class="row"><span class="label">LT</span><span class="value" id="turnover-lt">—</span></div>
       <div class="row"><span class="label">AT (3)</span><span class="value" id="turnover-at3">—</span></div>
       <div class="row"><span class="label">AT (20)</span><span class="value" id="turnover-at20">—</span></div>
+    </div>
+    <div id="turnover-box-daily">
+      <div class="ind-title">Daily (always)</div>
+      <div class="row"><span class="label">LT</span><span class="value" id="turnover-daily-lt">—</span></div>
+      <div class="row"><span class="label">AT (3)</span><span class="value" id="turnover-daily-at3">—</span></div>
+      <div class="row"><span class="label">AT (20)</span><span class="value" id="turnover-daily-at20">—</span></div>
     </div>
     <div id="chart"></div>
   </div>
@@ -361,10 +400,10 @@ const series = chart.addCandlestickSeries({
 
 // EMA overlays, sharing the main price scale.
 const emaSeries = {
-  ema_10:  chart.addLineSeries({ color: '#000000', lineWidth: 1, priceLineVisible: false, lastValueVisible: false }),
-  ema_20:  chart.addLineSeries({ color: '#2962ff', lineWidth: 1, priceLineVisible: false, lastValueVisible: false }),
-  ema_50:  chart.addLineSeries({ color: '#26a69a', lineWidth: 1, priceLineVisible: false, lastValueVisible: false }),
-  ema_200: chart.addLineSeries({ color: '#ef5350', lineWidth: 1, priceLineVisible: false, lastValueVisible: false }),
+  ema_10:  chart.addLineSeries({ color: '#000000', lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false }),
+  ema_20:  chart.addLineSeries({ color: '#2962ff', lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false }),
+  ema_50:  chart.addLineSeries({ color: '#26a69a', lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false }),
+  ema_200: chart.addLineSeries({ color: '#ef5350', lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false }),
 };
 
 // Dedicated, fully transparent series that ONLY exists to host the EMA
@@ -380,21 +419,26 @@ const crossoverSeries = chart.addLineSeries({
 });
 
 // Same trick again for earnings markers - an invisible line series that
-// only exists to host "E" badge markers. Attached to the volume/turnover
-// price scale (not the main price scale), so the badges render on the
-// volume panel, matching how TradingView shows them. TradingView's
-// house-shaped "E" icon isn't a shape Lightweight Charts can draw
-// natively; this uses a labeled square badge instead (teal for past
-// earnings, magenta for the next upcoming one) as the closest practical
-// equivalent.
+// only exists to host "E" badge markers, rendered in the same visual
+// band as the volume panel. Given its OWN dedicated price scale (rather
+// than sharing 'turnover' with the volume bars) - Lightweight Charts
+// reserves extra headroom above a series for its markers, and sharing a
+// scale with the volume bars was pushing their range and visually
+// compressing them, leaving blank space above. A separate scale with
+// matching margins avoids that while still looking like the same panel.
+// TradingView's house-shaped "E" icon isn't a shape Lightweight Charts
+// can draw natively; this uses a labeled square badge instead (teal for
+// past earnings, magenta for the next upcoming one) as the closest
+// practical equivalent.
 const earningsSeries = chart.addLineSeries({
   color: 'rgba(0,0,0,0)',
   lineWidth: 1,
-  priceScaleId: 'turnover',
+  priceScaleId: 'earnings_overlay',
   priceLineVisible: false,
   lastValueVisible: false,
   crosshairMarkerVisible: false,
 });
+chart.priceScale('earnings_overlay').applyOptions({ scaleMargins: { top: 0.75, bottom: 0 }, visible: false });
 let earningsData = {};
 
 fetch('chart_earnings.json')
@@ -438,6 +482,7 @@ const turnoverEmaSeries = chart.addLineSeries({
   priceScaleId: 'turnover',
   priceLineVisible: false,
   lastValueVisible: false,
+  crosshairMarkerVisible: false,
 });
 
 const TIMEFRAME_META = {
@@ -527,8 +572,8 @@ function computeEarningsMarkers(data, isIntraday) {
     out.push({
       time: barTime,
       position: 'aboveBar',
-      shape: 'square',
-      color: e.is_future ? '#e91e63' : '#009688',
+      shape: 'circle',
+      color: '#ff9800',
       text: 'E',
     });
   }
@@ -591,6 +636,23 @@ function loadTimeframe(tf) {
     });
 }
 
+// Always shows the latest DAILY figures in the top-right box, regardless
+// of whichever timeframe is currently active on the main chart - a
+// completely independent fetch from whatever loadTimeframe() is doing.
+function loadDailySnapshot(ticker) {
+  fetch(`${ticker.toLowerCase()}_daily.json`)
+    .then(r => r.json())
+    .then(data => {
+      const last = data[data.length - 1];
+      const ema3 = calculateEMA(data, 3, 'volume');
+      const ema20 = calculateEMA(data, 20, 'volume');
+      document.getElementById('turnover-daily-lt').textContent = formatVolume(last.volume);
+      document.getElementById('turnover-daily-at3').textContent = formatVolume(ema3[ema3.length - 1].value);
+      document.getElementById('turnover-daily-at20').textContent = formatVolume(ema20[ema20.length - 1].value);
+    })
+    .catch(() => setStatus(`Could not load ${ticker.toLowerCase()}_daily.json for the daily snapshot box.`, true));
+}
+
 function switchTicker(ticker) {
   currentTicker = ticker;
   document.querySelectorAll('.watch-row').forEach(row => row.classList.toggle('active', row.dataset.ticker === ticker));
@@ -599,6 +661,7 @@ function switchTicker(ticker) {
     document.getElementById('header-symbol').innerHTML = `${stock.ticker} <span class="name">${stock.name}</span>`;
   }
   loadTimeframe(currentTF);
+  loadDailySnapshot(ticker);
 }
 
 function renderWatchlist() {
@@ -783,6 +846,7 @@ window.addEventListener('resize', () => {
 });
 
 loadTimeframe('daily');
+loadDailySnapshot(currentTicker);
 </script>
 </body>
 </html>

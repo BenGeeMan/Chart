@@ -140,6 +140,31 @@
     flex: 1;
     min-height: 0;
   }
+  #draw-toolbar {
+    position: absolute;
+    top: 50%;
+    left: 0;
+    transform: translateY(-50%);
+    z-index: 6;
+    display: flex;
+    flex-direction: column;
+    background: #ffffff;
+    border: 1px solid var(--panel-border);
+    border-left: none;
+    border-radius: 0 6px 6px 0;
+  }
+  .draw-tool-btn {
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid var(--panel-border);
+    padding: 8px 9px;
+    font-size: 14px;
+    color: var(--text-dim);
+    cursor: pointer;
+  }
+  .draw-tool-btn:last-child { border-bottom: none; }
+  .draw-tool-btn:hover { background: rgba(0,0,0,0.04); color: var(--text); }
+  .draw-tool-btn.active { background: rgba(41,98,255,0.12); color: var(--accent); }
   #rsi-chart-container {
     position: relative;
     flex: none;
@@ -551,6 +576,13 @@
 
   <div id="chart-pane">
     <div id="main-chart-area">
+      <div id="draw-toolbar">
+        <button class="draw-tool-btn active" data-tool="none" title="Cursor (select/pan)">⊙</button>
+        <button class="draw-tool-btn" data-tool="trendline" title="Trend Line">╱</button>
+        <button class="draw-tool-btn" data-tool="hline" title="Horizontal Line">—</button>
+        <button class="draw-tool-btn" data-tool="ray" title="Ray">↗</button>
+        <button class="draw-tool-btn" data-tool="hray" title="Horizontal Ray">⇥</button>
+      </div>
       <div id="legend">
         <div class="headline" id="legend-headline">HPQ · Daily · NYSE</div>
         <button id="indicators-toggle" type="button">Indicators <span id="indicators-chevron">▾</span></button>
@@ -607,7 +639,7 @@
       </div>
       <div id="earnings-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">35</div>
+      <div id="build-number">36</div>
       <div id="main-no-data">No Data</div>
     </div>
     <div id="rsi-chart-container">
@@ -999,6 +1031,7 @@ const TIMEFRAME_META = {
 let markers = [];
 let crossoverMarkers = [];
 let priceLines = [];
+let userDrawings = []; // { type: 'trendline'|'ray'|'hray', time1, price1, time2, price2, color, source, series }
 let watchlistData = [];
 let currentVolumeEma3 = [];
 let currentVolumeEma20 = [];
@@ -1176,6 +1209,8 @@ function loadTimeframe(tf) {
       refreshMarkers();
       for (const pl of priceLines) series.removePriceLine(pl.lwcHandle);
       priceLines = [];
+      for (const d of userDrawings) if (d.series) chart.removeSeries(d.series);
+      userDrawings = [];
       updateOutputBox();
 
       document.querySelectorAll('.tf-btn').forEach(b => b.classList.toggle('active', b.dataset.tf === tf));
@@ -1379,6 +1414,104 @@ function parseAttrs(rest) {
   return attrs;
 }
 
+// --- Drawing tools: Trend Line, Horizontal Line, Ray, Horizontal Ray ---
+// Horizontal Line reuses the existing LINE/priceLines mechanism (it's
+// functionally identical to that protocol command). The other three are
+// genuinely new shape types, each rendered as a dedicated 2-point line
+// series. Rays extend to the edge of the currently LOADED data (not
+// truly infinite, but as far as we have data for) - Horizontal Ray
+// always extends rightward, matching the usual "project forward"
+// convention; a regular Ray extends in whichever direction its second
+// point implies, preserving the original slope via extrapolation.
+
+function timeToNumeric(t) {
+  return typeof t === 'number' ? t : Math.floor(new Date(t + 'T00:00:00Z').getTime() / 1000);
+}
+
+function extrapolatePrice(time1, price1, time2, price2, targetTime) {
+  const t1 = timeToNumeric(time1), t2 = timeToNumeric(time2), tt = timeToNumeric(targetTime);
+  if (t2 === t1) return price2;
+  const slope = (price2 - price1) / (t2 - t1);
+  return price1 + slope * (tt - t1);
+}
+
+function renderDrawing(drawing) {
+  const lineSeries = chart.addLineSeries({
+    color: drawing.color, lineWidth: 2, priceLineVisible: false,
+    lastValueVisible: false, crosshairMarkerVisible: false,
+  });
+  let points;
+  if (drawing.type === 'trendline') {
+    points = [{ time: drawing.time1, value: drawing.price1 }, { time: drawing.time2, value: drawing.price2 }];
+  } else if (drawing.type === 'ray') {
+    const goingRight = timeToNumeric(drawing.time2) >= timeToNumeric(drawing.time1);
+    const edgeTime = barsData.length ? (goingRight ? barsData[barsData.length - 1].time : barsData[0].time) : drawing.time2;
+    const edgePrice = extrapolatePrice(drawing.time1, drawing.price1, drawing.time2, drawing.price2, edgeTime);
+    points = [{ time: drawing.time1, value: drawing.price1 }, { time: edgeTime, value: edgePrice }];
+  } else if (drawing.type === 'hray') {
+    const edgeTime = barsData.length ? barsData[barsData.length - 1].time : drawing.time1;
+    points = [{ time: drawing.time1, value: drawing.price1 }, { time: edgeTime, value: drawing.price1 }];
+  }
+  points.sort((a, b) => timeToNumeric(a.time) - timeToNumeric(b.time));
+  lineSeries.setData(points);
+  drawing.series = lineSeries;
+}
+
+function addUserDrawing(type, time1, price1, time2, price2, color, source) {
+  const drawing = { type, time1, price1, time2, price2, color, source };
+  renderDrawing(drawing);
+  userDrawings.push(drawing);
+  updateOutputBox();
+  return drawing;
+}
+
+// Click-to-draw interaction. Trend Line and Ray need two clicks (anchor,
+// then endpoint); Horizontal Line and Horizontal Ray only need one,
+// since their second coordinate is implied. After completing a shape,
+// the tool automatically deselects back to the cursor.
+let activeDrawTool = 'none';
+let pendingDrawPoint = null;
+
+function setActiveDrawTool(tool) {
+  activeDrawTool = tool;
+  pendingDrawPoint = null;
+  document.querySelectorAll('.draw-tool-btn').forEach(b => b.classList.toggle('active', b.dataset.tool === tool));
+}
+
+document.querySelectorAll('.draw-tool-btn').forEach(btn => {
+  btn.addEventListener('click', () => setActiveDrawTool(btn.dataset.tool));
+});
+
+chart.subscribeClick(param => {
+  if (activeDrawTool === 'none' || !param.time || !param.point) return;
+  const price = series.coordinateToPrice(param.point.y);
+  if (price === null) return;
+
+  if (activeDrawTool === 'hline') {
+    const handle = series.createPriceLine({
+      price, color: '#2962ff', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed,
+      axisLabelVisible: true, title: '',
+    });
+    priceLines.push({ price, color: 'blue', label: '', lwcHandle: handle, source: 'user' });
+    updateOutputBox();
+    setActiveDrawTool('none');
+    return;
+  }
+  if (activeDrawTool === 'hray') {
+    addUserDrawing('hray', param.time, price, null, null, '#2962ff', 'user');
+    setActiveDrawTool('none');
+    return;
+  }
+  // trendline / ray - two clicks needed
+  if (!pendingDrawPoint) {
+    pendingDrawPoint = { time: param.time, price };
+    setStatus('Click a second point to finish the line.', false);
+    return;
+  }
+  addUserDrawing(activeDrawTool, pendingDrawPoint.time, pendingDrawPoint.price, param.time, price, '#2962ff', 'user');
+  setActiveDrawTool('none');
+});
+
 const shapeMap = { arrowUp: 'arrowUp', arrowDown: 'arrowDown', circle: 'circle' };
 const colorMap = { green: '#26a69a', red: '#ef5350', blue: '#2962ff' };
 
@@ -1418,7 +1551,25 @@ function renderCommands() {
         axisLabelVisible: true,
         title: attrs.label || '',
       });
-      priceLines.push({ price: parseFloat(attrs.price), color: attrs.color || 'blue', label: attrs.label || '', lwcHandle: handle });
+      priceLines.push({ price: parseFloat(attrs.price), color: attrs.color || 'blue', label: attrs.label || '', lwcHandle: handle, source: 'claude' });
+      addedLines++;
+    } else if (cmd === 'TRENDLINE' || cmd === 'RAY') {
+      if (!attrs.time1 || !attrs.price1 || !attrs.time2 || !attrs.price2) {
+        errors.push(`${cmd} missing time1/price1/time2/price2: "${line}"`);
+        continue;
+      }
+      addUserDrawing(
+        cmd === 'TRENDLINE' ? 'trendline' : 'ray',
+        attrs.time1, parseFloat(attrs.price1), attrs.time2, parseFloat(attrs.price2),
+        colorMap[attrs.color] || '#2962ff', 'claude'
+      );
+      addedLines++;
+    } else if (cmd === 'HRAY') {
+      if (!attrs.time || !attrs.price) {
+        errors.push(`HRAY missing time/price: "${line}"`);
+        continue;
+      }
+      addUserDrawing('hray', attrs.time, parseFloat(attrs.price), null, null, colorMap[attrs.color] || '#2962ff', 'claude');
       addedLines++;
     } else {
       errors.push(`Unknown command: "${line}"`);
@@ -1440,6 +1591,8 @@ function clearAll() {
   refreshMarkers();
   for (const pl of priceLines) series.removePriceLine(pl.lwcHandle);
   priceLines = [];
+  for (const d of userDrawings) if (d.series) chart.removeSeries(d.series);
+  userDrawings = [];
   document.getElementById('input-box').value = '';
   setStatus('Chart cleared.', false);
   updateOutputBox();
@@ -1503,7 +1656,19 @@ function updateOutputBox() {
     drawingLines.push(`MARKER date=${m.time} pos=${pos} shape=${shapeName} color=${colorName} text="${m.text}"${tag}`);
   }
   for (const pl of priceLines) {
-    drawingLines.push(`LINE price=${pl.price} color=${pl.color} label="${pl.label}"`);
+    const tag = pl.source === 'user' ? ' [added by user on chart]' : '';
+    drawingLines.push(`LINE price=${pl.price} color=${pl.color} label="${pl.label}"${tag}`);
+  }
+  for (const d of userDrawings) {
+    const colorName = Object.keys(colorMap).find(k => colorMap[k] === d.color) || 'blue';
+    const tag = d.source === 'user' ? ' [added by user on chart]' : '';
+    if (d.type === 'trendline') {
+      drawingLines.push(`TRENDLINE time1=${d.time1} price1=${d.price1} time2=${d.time2} price2=${d.price2} color=${colorName}${tag}`);
+    } else if (d.type === 'ray') {
+      drawingLines.push(`RAY time1=${d.time1} price1=${d.price1} time2=${d.time2} price2=${d.price2} color=${colorName}${tag}`);
+    } else if (d.type === 'hray') {
+      drawingLines.push(`HRAY time=${d.time1} price=${d.price1} color=${colorName}${tag}`);
+    }
   }
   lines.push(drawingLines.length ? drawingLines.join('\n') : '(none)');
 

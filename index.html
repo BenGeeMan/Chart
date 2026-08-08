@@ -157,8 +157,8 @@
   }
   #turnover-box {
     position: absolute;
-    bottom: 14px;
-    left: 12px;
+    bottom: 28px;
+    left: 0;
     z-index: 5;
     font-size: 11px;
     line-height: 1.7;
@@ -380,7 +380,9 @@ const crossoverSeries = chart.addLineSeries({
 });
 
 // Same trick again for earnings markers - an invisible line series that
-// only exists to host "E" badge markers above each bar. TradingView's
+// only exists to host "E" badge markers. Attached to the volume/turnover
+// price scale (not the main price scale), so the badges render on the
+// volume panel, matching how TradingView shows them. TradingView's
 // house-shaped "E" icon isn't a shape Lightweight Charts can draw
 // natively; this uses a labeled square badge instead (teal for past
 // earnings, magenta for the next upcoming one) as the closest practical
@@ -388,6 +390,7 @@ const crossoverSeries = chart.addLineSeries({
 const earningsSeries = chart.addLineSeries({
   color: 'rgba(0,0,0,0)',
   lineWidth: 1,
+  priceScaleId: 'turnover',
   priceLineVisible: false,
   lastValueVisible: false,
   crosshairMarkerVisible: false,
@@ -573,7 +576,7 @@ function loadTimeframe(tf) {
       crossoverMarkers = computeCrossoverMarkers(data);
       crossoverSeries.setData(data.filter(d => d.ema_10 != null).map(d => ({ time: d.time, value: d.ema_10 })));
       crossoverSeries.setMarkers(crossoverMarkers);
-      earningsSeries.setData(data.map(d => ({ time: d.time, value: d.close })));
+      earningsSeries.setData(data.map(d => ({ time: d.time, value: d.volume })));
       earningsSeries.setMarkers(computeEarningsMarkers(data, cfg.intraday));
       refreshMarkers();
       for (const pl of priceLines) series.removePriceLine(pl.lwcHandle);

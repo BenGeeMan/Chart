@@ -398,7 +398,7 @@
       </div>
       <div id="earnings-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">1</div>
+      <div id="build-number">2</div>
     </div>
     <div id="rsi-chart-container">
       <div id="rsi-chart"></div>
@@ -892,23 +892,29 @@ document.querySelectorAll('#legend .ind-row[data-series]').forEach(row => {
 let rsiEnabled = true;
 
 function setRsiEnabled(enabled) {
+  console.log('[RSI DEBUG] setRsiEnabled called with:', enabled);
   rsiEnabled = enabled;
-  document.getElementById('rsi-chart-container').classList.toggle('hidden', !enabled);
+  const container = document.getElementById('rsi-chart-container');
+  container.classList.toggle('hidden', !enabled);
+  console.log('[RSI DEBUG] container hidden class is now:', container.classList.contains('hidden'), '- container size:', container.clientWidth, container.clientHeight);
   chart.applyOptions({ width: chartEl.clientWidth, height: chartEl.clientHeight });
   if (enabled) {
-    // Double requestAnimationFrame - a well-established technique for
-    // "wait until the browser has genuinely finished laying out AND
-    // painting," which is more reliable than a single frame for this
-    // kind of just-became-visible measurement.
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
-        createRsiChart();
+        console.log('[RSI DEBUG] about to createRsiChart(), container size now:', document.getElementById('rsi-chart-container').clientWidth, document.getElementById('rsi-chart-container').clientHeight);
+        try {
+          createRsiChart();
+          console.log('[RSI DEBUG] createRsiChart() completed without throwing. rsiChart is:', rsiChart);
+        } catch (err) {
+          console.error('[RSI DEBUG] createRsiChart() THREW:', err);
+        }
       });
     });
   } else if (rsiChart) {
     rsiChart.remove();
     rsiChart = null;
     rsiSeries = null;
+    console.log('[RSI DEBUG] RSI chart removed.');
   }
 }
 

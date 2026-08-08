@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Chart Bridge — HPQ</title>
 <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+<script src="https://unpkg.com/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 <style>
   :root {
     --bg: #ffffff;
@@ -523,7 +524,7 @@
       </div>
       <div id="earnings-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">22</div>
+      <div id="build-number">24</div>
       <div id="main-no-data">No Data</div>
     </div>
     <div id="rsi-chart-container">
@@ -564,6 +565,19 @@
       <textarea id="output-box" readonly placeholder="Nothing on the chart yet."></textarea>
       <div class="actions">
         <button id="copy-btn">Copy to clipboard</button>
+      </div>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="sidebar-title">Chart Screenshot</div>
+      <div class="hint">Captures the chart itself (not the watchlist or this panel), including earnings badges and info boxes.</div>
+      <div class="actions">
+        <button id="copy-image-btn">Copy image</button>
+        <button id="save-image-btn" class="secondary">Save image</button>
+      </div>
+      <div class="hint" style="margin-top:8px;">This version also bakes the Chart State text directly into the image, so one paste gives Claude both.</div>
+      <div class="actions">
+        <button id="copy-image-claude-btn">Copy image for Claude</button>
       </div>
     </div>
   </div>
@@ -1409,6 +1423,124 @@ document.getElementById('copy-btn').addEventListener('click', () => {
   const box = document.getElementById('output-box');
   box.select();
   navigator.clipboard.writeText(box.value).then(() => setStatus('Copied to clipboard.', false));
+});
+
+// Captures just the chart canvas(es) - not the watchlist, not the
+// sidebar - since Lightweight Charts' own takeScreenshot() only
+// captures what it actually draws (candles, EMA/volume/RSI lines,
+// markers), the HTML-overlay elements (earnings badges, the info
+// boxes) are NOT included, since those are separate DOM elements
+// layered on top rather than part of the chart's own canvas. A legend
+// of currently-active indicators is drawn onto the image afterward,
+// in the top-right corner, to compensate for the collapsible on-screen
+// legend not being part of the capture either.
+// Captures the full chart area as actually rendered on screen -
+// candles/EMA/volume/RSI lines AND the HTML-overlay elements
+// (earnings badges, the info boxes) that a plain canvas screenshot
+// would miss, since those are separate DOM elements layered on top
+// rather than part of the chart library's own canvas. Deliberately
+// scoped to #main-chart-area and #rsi-chart-container only - never the
+// watchlist or either sidebar panel.
+async function captureChartArea() {
+  const mainAreaCanvas = await html2canvas(document.getElementById('main-chart-area'), { backgroundColor: '#ffffff' });
+  let combined = mainAreaCanvas;
+
+  if (rsiChart && rsiEnabled) {
+    const rsiAreaCanvas = await html2canvas(document.getElementById('rsi-chart-container'), { backgroundColor: '#ffffff' });
+    combined = document.createElement('canvas');
+    combined.width = Math.max(mainAreaCanvas.width, rsiAreaCanvas.width);
+    combined.height = mainAreaCanvas.height + rsiAreaCanvas.height;
+    const ctx = combined.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, combined.width, combined.height);
+    ctx.drawImage(mainAreaCanvas, 0, 0);
+    ctx.drawImage(rsiAreaCanvas, 0, mainAreaCanvas.height);
+  }
+
+  drawIndicatorLegend(combined);
+  return combined;
+}
+
+// Drawn separately from whatever html2canvas captured, so the active-
+// indicator list is always present in the image even when the on-screen
+// legend panel is currently collapsed.
+function drawIndicatorLegend(canvas) {
+  const activeLabels = [...document.querySelectorAll('.ind-row')]
+    .filter(row => row.querySelector('input[type="checkbox"]').checked)
+    .map(row => row.textContent.trim());
+
+  const ctx = canvas.getContext('2d');
+  const padding = 8, lineHeight = 14, titleHeight = 16;
+  const boxWidth = 190;
+  const boxHeight = padding * 2 + titleHeight + lineHeight * activeLabels.length;
+  const x = canvas.width - boxWidth - 10;
+  const y = 10;
+
+  ctx.fillStyle = 'rgba(255,255,255,0.94)';
+  ctx.strokeStyle = '#e0e3eb';
+  ctx.lineWidth = 1;
+  ctx.fillRect(x, y, boxWidth, boxHeight);
+  ctx.strokeRect(x, y, boxWidth, boxHeight);
+  ctx.fillStyle = '#131722';
+  ctx.font = 'bold 10px sans-serif';
+  ctx.fillText(`Active indicators - ${currentTicker}`, x + padding, y + padding + 9);
+  ctx.font = '10px sans-serif';
+  activeLabels.forEach((label, i) => {
+    ctx.fillText(label, x + padding, y + padding + titleHeight + lineHeight * i + 9);
+  });
+}
+
+// Appends the full Chart State text as actual rendered (readable) text
+// below the image, ONLY for the "for Claude" capture - since Claude can
+// read text directly out of an image, this lets one paste deliver both
+// the visual chart and its full context in a single action, instead of
+// needing separate text-copy and image-copy steps.
+function appendTextBlock(canvas, text) {
+  const lines = text.split('\n');
+  const padding = 12, lineHeight = 13;
+  const extraHeight = padding * 2 + lineHeight * lines.length;
+  const result = document.createElement('canvas');
+  result.width = canvas.width;
+  result.height = canvas.height + extraHeight;
+  const ctx = result.getContext('2d');
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, result.width, result.height);
+  ctx.drawImage(canvas, 0, 0);
+  ctx.fillStyle = '#131722';
+  ctx.font = '11px monospace';
+  lines.forEach((line, i) => {
+    ctx.fillText(line, padding, canvas.height + padding + lineHeight * i + 10);
+  });
+  return result;
+}
+
+document.getElementById('copy-image-btn').addEventListener('click', async () => {
+  (await captureChartArea()).toBlob(blob => {
+    navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
+      .then(() => setStatus('Chart image copied to clipboard.', false))
+      .catch(() => setStatus('Could not copy image - your browser may not support this.', true));
+  });
+});
+
+document.getElementById('save-image-btn').addEventListener('click', async () => {
+  (await captureChartArea()).toBlob(blob => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `${currentTicker}_${currentTF}_chart.png`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    setStatus('Chart image saved.', false);
+  });
+});
+
+document.getElementById('copy-image-claude-btn').addEventListener('click', async () => {
+  const chartCanvas = await captureChartArea();
+  const withText = appendTextBlock(chartCanvas, document.getElementById('output-box').value);
+  withText.toBlob(blob => {
+    navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
+      .then(() => setStatus('Image with Chart State text copied to clipboard.', false))
+      .catch(() => setStatus('Could not copy image - your browser may not support this.', true));
+  });
 });
 
 window.addEventListener('resize', () => {

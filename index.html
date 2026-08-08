@@ -473,15 +473,14 @@
         <button id="indicators-toggle" type="button">Indicators <span id="indicators-chevron">▾</span></button>
         <div id="indicators-panel">
           <div class="ind-col">
-            <div class="ind-col-title"><input type="checkbox" checked class="col-master">Price EMAs</div>
+            <div class="ind-col-title"><input type="checkbox" checked class="col-master">Standard EMAs</div>
             <label class="ind-row" data-series="ema_10"><input type="checkbox" checked><span class="swatch" style="background:#000000"></span>EMA 10</label>
             <label class="ind-row" data-series="ema_20"><input type="checkbox" checked><span class="swatch" style="background:#2962ff"></span>EMA 20</label>
             <label class="ind-row" data-series="ema_50"><input type="checkbox" checked><span class="swatch" style="background:#26a69a"></span>EMA 50</label>
             <label class="ind-row" data-series="ema_200"><input type="checkbox" checked><span class="swatch" style="background:#ef5350"></span>EMA 200</label>
-            <label class="ind-row" data-series="ema_cross"><input type="checkbox" checked><span class="swatch" style="background:#ff9800;width:7px;height:7px;border-radius:50%;"></span>10/20 EMA cross</label>
           </div>
           <div class="ind-col">
-            <div class="ind-col-title"><input type="checkbox" class="col-master">Timeframe EMAs (10)</div>
+            <div class="ind-col-title"><input type="checkbox" class="col-master">M10s</div>
             <label class="ind-row" data-mtf-ema="m5"><input type="checkbox"><span class="swatch" style="background:#e91e63"></span>5m</label>
             <label class="ind-row" data-mtf-ema="m15"><input type="checkbox"><span class="swatch" style="background:#fb8c00"></span>15m</label>
             <label class="ind-row" data-mtf-ema="hourly"><input type="checkbox"><span class="swatch" style="background:#8e24aa"></span>1H</label>
@@ -491,18 +490,22 @@
             <label class="ind-row" data-mtf-ema="quarterly"><input type="checkbox"><span class="swatch" style="background:#7cb342"></span>Quarterly</label>
           </div>
           <div class="ind-col">
-            <div class="ind-col-title"><input type="checkbox" class="col-master">Relative EMAs (10)</div>
+            <div class="ind-col-title"><input type="checkbox" class="col-master">Relative M10s</div>
             <label class="ind-row" data-rel-ema="rel1"><input type="checkbox"><span class="swatch" style="background:#f9a825"></span>1 TF above</label>
             <label class="ind-row" data-rel-ema="rel2"><input type="checkbox"><span class="swatch" style="background:#455a64"></span>2 TFs above</label>
           </div>
           <div class="ind-col">
-            <div class="ind-col-title"><input type="checkbox" checked class="col-master">Volume &amp; Earnings</div>
-            <label class="ind-row" data-series="earnings"><input type="checkbox" checked><span class="swatch" style="width:9px;height:9px;background:#ff9800;clip-path:polygon(50% 0%,100% 38%,100% 100%,0% 100%,0% 38%);"></span>Earnings</label>
+            <div class="ind-col-title"><input type="checkbox" checked class="col-master">Volume</div>
             <label class="ind-row" data-series="turnover"><input type="checkbox" checked>Volume</label>
             <label class="ind-row" data-series="turnover_ema"><input type="checkbox" checked><span class="swatch dashed" style="border-color:#5b8ff9"></span>Volume EMA 20</label>
           </div>
           <div class="ind-col">
-            <div class="ind-col-title"><input type="checkbox" checked class="col-master">RSI</div>
+            <div class="ind-col-title"><input type="checkbox" checked class="col-master">Events</div>
+            <label class="ind-row" data-series="earnings"><input type="checkbox" checked><span class="swatch" style="width:9px;height:9px;background:#ff9800;clip-path:polygon(50% 0%,100% 38%,100% 100%,0% 100%,0% 38%);"></span>Earnings</label>
+            <label class="ind-row" data-series="ema_cross"><input type="checkbox" checked><span class="swatch" style="background:#ff9800;width:7px;height:7px;border-radius:50%;"></span>10/20 EMA cross</label>
+          </div>
+          <div class="ind-col">
+            <div class="ind-col-title"><input type="checkbox" checked class="col-master">Indicators</div>
             <label class="ind-row" data-series="rsi"><input type="checkbox" checked><span class="swatch" style="background:#131722"></span>RSI (14)</label>
           </div>
         </div>
@@ -520,7 +523,7 @@
       </div>
       <div id="earnings-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">19</div>
+      <div id="build-number">21</div>
       <div id="main-no-data">No Data</div>
     </div>
     <div id="rsi-chart-container">

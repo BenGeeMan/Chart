@@ -398,7 +398,7 @@
       </div>
       <div id="earnings-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">3</div>
+      <div id="build-number">4</div>
     </div>
     <div id="rsi-chart-container">
       <div id="rsi-chart"></div>
@@ -594,6 +594,14 @@ function createRsiChart() {
   }
   const mainRange = chart.timeScale().getVisibleLogicalRange();
   if (mainRange) rsiChart.timeScale().setVisibleLogicalRange(mainRange);
+  rsiChart.timeScale().fitContent();
+  // Force an explicit resize/repaint on the next frame - on a fresh
+  // toggle, data gets set in the same tick the chart is created, which
+  // may be before the browser has painted this canvas even once.
+  requestAnimationFrame(() => {
+    rsiChart.applyOptions({ width: rsiChartEl.clientWidth, height: rsiChartEl.clientHeight });
+    console.log('[RSI DEBUG] forced redraw applied on next frame.');
+  });
 
   rsiChart.timeScale().subscribeVisibleLogicalRangeChange(range => {
     if (!range || syncingFromMain) return;

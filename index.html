@@ -175,22 +175,60 @@
     z-index: 5;
     font-size: 12px;
     line-height: 1.7;
-    pointer-events: none;
     user-select: none;
   }
   #legend .headline {
     font-weight: 700;
     color: var(--text);
+    pointer-events: none;
   }
   #legend .headline .change-up { color: var(--up); }
   #legend .headline .change-down { color: var(--down); }
+  #indicators-toggle {
+    background: #ffffff;
+    border: 1px solid var(--panel-border);
+    border-radius: 4px;
+    padding: 3px 9px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text);
+    cursor: pointer;
+    margin-top: 3px;
+  }
+  #indicators-toggle:hover { background: rgba(0,0,0,0.03); }
+  #indicators-chevron { display: inline-block; transition: transform 0.12s ease; }
+  #legend.expanded #indicators-chevron { transform: rotate(180deg); }
+  #indicators-panel {
+    display: none;
+    margin-top: 4px;
+    background: #ffffff;
+    border: 1px solid var(--panel-border);
+    border-radius: 6px;
+    padding: 10px 14px;
+    gap: 18px;
+  }
+  #legend.expanded #indicators-panel { display: flex; }
+  .ind-col {
+    display: flex;
+    flex-direction: column;
+    min-width: 90px;
+  }
+  .ind-col-title {
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    margin-bottom: 3px;
+    white-space: nowrap;
+  }
   #legend .ind-row {
     display: flex;
     align-items: center;
     gap: 6px;
     color: var(--text-dim);
-    pointer-events: auto;
     cursor: pointer;
+    white-space: nowrap;
   }
   #legend .ind-row.off {
     opacity: 0.45;
@@ -204,6 +242,7 @@
     display: inline-block;
     width: 12px;
     height: 2px;
+    flex: none;
   }
   #legend .swatch.dashed {
     border-top: 2px dashed;
@@ -427,23 +466,37 @@
     <div id="main-chart-area">
       <div id="legend">
         <div class="headline" id="legend-headline">HPQ · Daily · NYSE</div>
-        <label class="ind-row" data-series="ema_10"><input type="checkbox" checked><span class="swatch" style="background:#000000"></span>EMA 10</label>
-        <label class="ind-row" data-series="ema_20"><input type="checkbox" checked><span class="swatch" style="background:#2962ff"></span>EMA 20</label>
-        <label class="ind-row" data-series="ema_50"><input type="checkbox" checked><span class="swatch" style="background:#26a69a"></span>EMA 50</label>
-        <label class="ind-row" data-series="ema_200"><input type="checkbox" checked><span class="swatch" style="background:#ef5350"></span>EMA 200</label>
-        <label class="ind-row" data-series="ema_cross"><input type="checkbox" checked><span class="swatch" style="background:#ff9800;width:7px;height:7px;border-radius:50%;"></span>10/20 EMA cross</label>
-        <label class="ind-row" data-series="earnings"><input type="checkbox" checked><span class="swatch" style="width:9px;height:9px;background:#ff9800;clip-path:polygon(50% 0%,100% 38%,100% 100%,0% 100%,0% 38%);"></span>Earnings (daily+ only)</label>
-        <label class="ind-row" data-series="turnover" style="margin-top:4px;"><input type="checkbox" checked>Volume (bars, red/teal by direction)</label>
-        <label class="ind-row" data-series="turnover_ema"><input type="checkbox" checked><span class="swatch dashed" style="border-color:#5b8ff9"></span>Volume EMA 20</label>
-        <label class="ind-row" data-series="rsi" style="margin-top:4px;"><input type="checkbox" checked><span class="swatch" style="background:#131722"></span>RSI (14)</label>
-        <div class="ind-row" style="margin-top:4px; cursor:default; font-size:10px; letter-spacing:0.4px; text-transform:uppercase;">10 EMA - any timeframe</div>
-        <label class="ind-row" data-mtf-ema="m5"><input type="checkbox"><span class="swatch" style="background:#e91e63"></span>10 EMA 5m</label>
-        <label class="ind-row" data-mtf-ema="m15"><input type="checkbox"><span class="swatch" style="background:#fb8c00"></span>10 EMA 15m</label>
-        <label class="ind-row" data-mtf-ema="hourly"><input type="checkbox"><span class="swatch" style="background:#8e24aa"></span>10 EMA 1H</label>
-        <label class="ind-row" data-mtf-ema="daily"><input type="checkbox"><span class="swatch" style="background:#3949ab"></span>10 EMA D</label>
-        <label class="ind-row" data-mtf-ema="weekly"><input type="checkbox"><span class="swatch" style="background:#6d4c41"></span>10 EMA W</label>
-        <label class="ind-row" data-mtf-ema="monthly"><input type="checkbox"><span class="swatch" style="background:#00acc1"></span>10 EMA M</label>
-        <label class="ind-row" data-mtf-ema="quarterly"><input type="checkbox"><span class="swatch" style="background:#7cb342"></span>10 EMA Q</label>
+        <button id="indicators-toggle" type="button">Indicators <span id="indicators-chevron">▾</span></button>
+        <div id="indicators-panel">
+          <div class="ind-col">
+            <div class="ind-col-title">Price EMAs</div>
+            <label class="ind-row" data-series="ema_10"><input type="checkbox" checked><span class="swatch" style="background:#000000"></span>EMA 10</label>
+            <label class="ind-row" data-series="ema_20"><input type="checkbox" checked><span class="swatch" style="background:#2962ff"></span>EMA 20</label>
+            <label class="ind-row" data-series="ema_50"><input type="checkbox" checked><span class="swatch" style="background:#26a69a"></span>EMA 50</label>
+            <label class="ind-row" data-series="ema_200"><input type="checkbox" checked><span class="swatch" style="background:#ef5350"></span>EMA 200</label>
+            <label class="ind-row" data-series="ema_cross"><input type="checkbox" checked><span class="swatch" style="background:#ff9800;width:7px;height:7px;border-radius:50%;"></span>10/20 EMA cross</label>
+          </div>
+          <div class="ind-col">
+            <div class="ind-col-title">Timeframe EMAs (10)</div>
+            <label class="ind-row" data-mtf-ema="m5"><input type="checkbox"><span class="swatch" style="background:#e91e63"></span>5m</label>
+            <label class="ind-row" data-mtf-ema="m15"><input type="checkbox"><span class="swatch" style="background:#fb8c00"></span>15m</label>
+            <label class="ind-row" data-mtf-ema="hourly"><input type="checkbox"><span class="swatch" style="background:#8e24aa"></span>1H</label>
+            <label class="ind-row" data-mtf-ema="daily"><input type="checkbox"><span class="swatch" style="background:#3949ab"></span>Daily</label>
+            <label class="ind-row" data-mtf-ema="weekly"><input type="checkbox"><span class="swatch" style="background:#6d4c41"></span>Weekly</label>
+            <label class="ind-row" data-mtf-ema="monthly"><input type="checkbox"><span class="swatch" style="background:#00acc1"></span>Monthly</label>
+            <label class="ind-row" data-mtf-ema="quarterly"><input type="checkbox"><span class="swatch" style="background:#7cb342"></span>Quarterly</label>
+          </div>
+          <div class="ind-col">
+            <div class="ind-col-title">Volume &amp; Earnings</div>
+            <label class="ind-row" data-series="earnings"><input type="checkbox" checked><span class="swatch" style="width:9px;height:9px;background:#ff9800;clip-path:polygon(50% 0%,100% 38%,100% 100%,0% 100%,0% 38%);"></span>Earnings</label>
+            <label class="ind-row" data-series="turnover"><input type="checkbox" checked>Volume</label>
+            <label class="ind-row" data-series="turnover_ema"><input type="checkbox" checked><span class="swatch dashed" style="border-color:#5b8ff9"></span>Volume EMA 20</label>
+          </div>
+          <div class="ind-col">
+            <div class="ind-col-title">RSI</div>
+            <label class="ind-row" data-series="rsi"><input type="checkbox" checked><span class="swatch" style="background:#131722"></span>RSI (14)</label>
+          </div>
+        </div>
       </div>
       <div id="turnover-box">
         <div class="row"><span class="label">LT</span><span class="value" id="turnover-lt">—</span></div>
@@ -458,7 +511,7 @@
       </div>
       <div id="earnings-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">17</div>
+      <div id="build-number">18</div>
       <div id="main-no-data">No Data</div>
     </div>
     <div id="rsi-chart-container">
@@ -1048,6 +1101,10 @@ fetch('chart_watchlist.json')
     renderWatchlist();
   })
   .catch(() => setStatus('Could not load chart_watchlist.json.', true));
+
+document.getElementById('indicators-toggle').addEventListener('click', () => {
+  document.getElementById('legend').classList.toggle('expanded');
+});
 
 document.querySelectorAll('.tf-btn').forEach(btn => {
   btn.addEventListener('click', () => loadTimeframe(btn.dataset.tf));

@@ -66,6 +66,58 @@
   .tf-btn:hover { background: rgba(0,0,0,0.04); color: var(--text); }
   .tf-btn.active { background: rgba(41,98,255,0.10); color: var(--accent); }
 
+  .header-icon-buttons {
+    display: flex;
+    gap: 2px;
+    margin-left: auto;
+  }
+  .icon-btn {
+    flex: none;
+    background: transparent;
+    border: none;
+    border-radius: 4px;
+    padding: 6px 9px;
+    font-size: 14px;
+    line-height: 1;
+    cursor: pointer;
+  }
+  .icon-btn:hover { background: rgba(0,0,0,0.05); }
+  .icon-btn.accent { color: var(--accent); }
+  .icon-btn.accent:hover { background: rgba(41,98,255,0.10); }
+
+  #paste-modal-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.35);
+    z-index: 50;
+    align-items: center;
+    justify-content: center;
+  }
+  #paste-modal-overlay.show { display: flex; }
+  #paste-modal {
+    background: #ffffff;
+    border-radius: 8px;
+    padding: 16px;
+    width: 420px;
+    box-shadow: 0 8px 30px rgba(0,0,0,0.25);
+  }
+  #paste-modal-textarea {
+    width: 100%;
+    height: 140px;
+    resize: none;
+    background: #ffffff;
+    color: var(--text);
+    border: 1px solid var(--panel-border);
+    border-radius: 4px;
+    padding: 10px;
+    font-family: var(--mono);
+    font-size: 12px;
+    line-height: 1.5;
+    margin-top: 8px;
+  }
+  #paste-modal-textarea:focus { outline: 1px solid var(--accent); }
+
   #chart-pane {
     display: flex;
     flex-direction: column;
@@ -348,15 +400,14 @@
   .earnings-badge {
     position: absolute;
     bottom: 38px;
-    width: 15px;
-    height: 15px;
+    width: 14px;
+    height: 14px;
     background: #ff9800;
-    clip-path: polygon(50% 0%, 100% 38%, 100% 100%, 0% 100%, 0% 38%);
+    border-radius: 3px;
     transform: translateX(-50%);
     display: flex;
-    align-items: flex-end;
+    align-items: center;
     justify-content: center;
-    padding-bottom: 1px;
     font-size: 8px;
     font-weight: 700;
     color: #ffffff;
@@ -460,7 +511,24 @@
       <button class="tf-btn" data-tf="monthly">M</button>
       <button class="tf-btn" data-tf="quarterly">Q</button>
     </div>
+    <div class="header-icon-buttons">
+      <button id="paste-modal-btn" class="icon-btn" title="Paste from Claude">📥</button>
+      <button id="copy-image-btn" class="icon-btn" title="Copy image">📋</button>
+      <button id="save-image-btn" class="icon-btn" title="Save image">⬇</button>
+      <button id="copy-image-claude-btn" class="icon-btn accent" title="Copy image for Claude">✦</button>
+    </div>
   </header>
+
+  <div id="paste-modal-overlay">
+    <div id="paste-modal">
+      <div class="sidebar-title">Paste Claude's Instructions</div>
+      <textarea id="paste-modal-textarea" placeholder="Paste MARKER / LINE commands here"></textarea>
+      <div class="actions">
+        <button id="paste-modal-draw-btn">Draw on chart</button>
+        <button id="paste-modal-cancel-btn" class="secondary">Cancel</button>
+      </div>
+    </div>
+  </div>
 
   <div id="watchlist">
     <div class="watchlist-title">Watchlist</div>
@@ -502,7 +570,7 @@
           </div>
           <div class="ind-col">
             <div class="ind-col-title"><input type="checkbox" checked class="col-master">Events</div>
-            <label class="ind-row" data-series="earnings"><input type="checkbox" checked><span class="swatch" style="width:9px;height:9px;background:#ff9800;clip-path:polygon(50% 0%,100% 38%,100% 100%,0% 100%,0% 38%);"></span>Earnings</label>
+            <label class="ind-row" data-series="earnings"><input type="checkbox" checked><span class="swatch" style="width:9px;height:9px;background:#ff9800;border-radius:2px;"></span>Earnings</label>
             <label class="ind-row" data-series="ema_cross"><input type="checkbox" checked><span class="swatch" style="background:#ff9800;width:7px;height:7px;border-radius:50%;"></span>10/20 EMA cross</label>
           </div>
           <div class="ind-col">
@@ -524,7 +592,7 @@
       </div>
       <div id="earnings-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">24</div>
+      <div id="build-number">29</div>
       <div id="main-no-data">No Data</div>
     </div>
     <div id="rsi-chart-container">
@@ -565,19 +633,6 @@
       <textarea id="output-box" readonly placeholder="Nothing on the chart yet."></textarea>
       <div class="actions">
         <button id="copy-btn">Copy to clipboard</button>
-      </div>
-    </div>
-
-    <div class="sidebar-section">
-      <div class="sidebar-title">Chart Screenshot</div>
-      <div class="hint">Captures the chart itself (not the watchlist or this panel), including earnings badges and info boxes.</div>
-      <div class="actions">
-        <button id="copy-image-btn">Copy image</button>
-        <button id="save-image-btn" class="secondary">Save image</button>
-      </div>
-      <div class="hint" style="margin-top:8px;">This version also bakes the Chart State text directly into the image, so one paste gives Claude both.</div>
-      <div class="actions">
-        <button id="copy-image-claude-btn">Copy image for Claude</button>
       </div>
     </div>
   </div>
@@ -1368,6 +1423,19 @@ function clearAll() {
   updateOutputBox();
 }
 
+const COLOR_NAMES = {
+  '0,0,0': 'black', '41,98,255': 'blue', '38,166,154': 'green', '239,83,80': 'red',
+  '255,152,0': 'orange', '233,30,99': 'pink', '251,140,0': 'amber', '142,36,170': 'purple',
+  '57,73,171': 'indigo', '109,76,65': 'brown', '0,172,193': 'cyan', '124,179,66': 'light green',
+  '249,168,37': 'gold', '69,90,100': 'slate', '91,143,249': 'light blue', '19,23,34': 'black',
+};
+
+function rgbToColorName(rgbString) {
+  const match = rgbString.match(/(\d+),\s*(\d+),\s*(\d+)/);
+  if (!match) return null;
+  return COLOR_NAMES[`${match[1]},${match[2]},${match[3]}`] || null;
+}
+
 function updateOutputBox() {
   const lines = [];
 
@@ -1380,11 +1448,25 @@ function updateOutputBox() {
   lines.push('--- Indicators ---');
   document.querySelectorAll('.ind-col').forEach(col => {
     const title = col.querySelector('.ind-col-title').textContent.trim();
-    const states = [...col.querySelectorAll('.ind-row')].map(row => {
-      const cb = row.querySelector('input[type="checkbox"]');
-      return `${row.textContent.trim()}: ${cb.checked ? 'ON' : 'OFF'}`;
-    });
-    lines.push(`${title} - ${states.join(', ')}`);
+    const states = [...col.querySelectorAll('.ind-row')]
+      // RSI, Earnings, and the Volume bars are all visually obvious
+      // directly from the chart/image itself (each either appears or
+      // doesn't) - no need to also spell that out in text. Volume EMA 20
+      // stays listed since it's a specific colored line worth naming.
+      .filter(row => !['rsi', 'earnings', 'turnover'].includes(row.dataset.series))
+      .map(row => {
+        const cb = row.querySelector('input[type="checkbox"]');
+        const label = row.textContent.trim();
+        const swatch = row.querySelector('.swatch');
+        let colorName = null;
+        if (swatch) {
+          const style = getComputedStyle(swatch);
+          colorName = rgbToColorName(style.backgroundColor) || rgbToColorName(style.borderTopColor);
+        }
+        const colorSuffix = colorName ? ` (${colorName})` : '';
+        return `${label}${colorSuffix}: ${cb.checked ? 'ON' : 'OFF'}`;
+      });
+    if (states.length) lines.push(`${title} - ${states.join(', ')}`);
   });
 
   lines.push('');
@@ -1418,6 +1500,28 @@ chart.subscribeCrosshairMove(param => {
 });
 
 document.getElementById('render-btn').addEventListener('click', renderCommands);
+
+// Quick-paste modal - a temporary popup alternative to the always-open
+// sidebar textarea, reachable from the header. Reuses the exact same
+// renderCommands() parsing/drawing logic by just handing its text over
+// to the existing input box first, rather than duplicating that logic.
+const pasteModalOverlay = document.getElementById('paste-modal-overlay');
+document.getElementById('paste-modal-btn').addEventListener('click', () => {
+  document.getElementById('paste-modal-textarea').value = '';
+  pasteModalOverlay.classList.add('show');
+  document.getElementById('paste-modal-textarea').focus();
+});
+document.getElementById('paste-modal-cancel-btn').addEventListener('click', () => {
+  pasteModalOverlay.classList.remove('show');
+});
+pasteModalOverlay.addEventListener('click', (e) => {
+  if (e.target === pasteModalOverlay) pasteModalOverlay.classList.remove('show');
+});
+document.getElementById('paste-modal-draw-btn').addEventListener('click', () => {
+  document.getElementById('input-box').value = document.getElementById('paste-modal-textarea').value;
+  renderCommands();
+  pasteModalOverlay.classList.remove('show');
+});
 document.getElementById('clear-btn').addEventListener('click', clearAll);
 document.getElementById('copy-btn').addEventListener('click', () => {
   const box = document.getElementById('output-box');
@@ -1433,13 +1537,13 @@ document.getElementById('copy-btn').addEventListener('click', () => {
 // layered on top rather than part of the chart's own canvas. A legend
 // of currently-active indicators is drawn onto the image afterward,
 // in the top-right corner, to compensate for the collapsible on-screen
-// legend not being part of the capture either.
 // Captures the full chart area as actually rendered on screen -
 // candles/EMA/volume/RSI lines AND the HTML-overlay elements
-// (earnings badges, the info boxes) that a plain canvas screenshot
-// would miss, since those are separate DOM elements layered on top
-// rather than part of the chart library's own canvas. Deliberately
-// scoped to #main-chart-area and #rsi-chart-container only - never the
+// (earnings badges, the info boxes, the indicator legend if it's
+// currently expanded) that a plain canvas screenshot would miss, since
+// those are separate DOM elements layered on top rather than part of
+// the chart library's own canvas. Deliberately scoped to
+// #main-chart-area and #rsi-chart-container only - never the
 // watchlist or either sidebar panel.
 async function captureChartArea() {
   const mainAreaCanvas = await html2canvas(document.getElementById('main-chart-area'), { backgroundColor: '#ffffff' });
@@ -1457,37 +1561,7 @@ async function captureChartArea() {
     ctx.drawImage(rsiAreaCanvas, 0, mainAreaCanvas.height);
   }
 
-  drawIndicatorLegend(combined);
   return combined;
-}
-
-// Drawn separately from whatever html2canvas captured, so the active-
-// indicator list is always present in the image even when the on-screen
-// legend panel is currently collapsed.
-function drawIndicatorLegend(canvas) {
-  const activeLabels = [...document.querySelectorAll('.ind-row')]
-    .filter(row => row.querySelector('input[type="checkbox"]').checked)
-    .map(row => row.textContent.trim());
-
-  const ctx = canvas.getContext('2d');
-  const padding = 8, lineHeight = 14, titleHeight = 16;
-  const boxWidth = 190;
-  const boxHeight = padding * 2 + titleHeight + lineHeight * activeLabels.length;
-  const x = canvas.width - boxWidth - 10;
-  const y = 10;
-
-  ctx.fillStyle = 'rgba(255,255,255,0.94)';
-  ctx.strokeStyle = '#e0e3eb';
-  ctx.lineWidth = 1;
-  ctx.fillRect(x, y, boxWidth, boxHeight);
-  ctx.strokeRect(x, y, boxWidth, boxHeight);
-  ctx.fillStyle = '#131722';
-  ctx.font = 'bold 10px sans-serif';
-  ctx.fillText(`Active indicators - ${currentTicker}`, x + padding, y + padding + 9);
-  ctx.font = '10px sans-serif';
-  activeLabels.forEach((label, i) => {
-    ctx.fillText(label, x + padding, y + padding + titleHeight + lineHeight * i + 9);
-  });
 }
 
 // Appends the full Chart State text as actual rendered (readable) text

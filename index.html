@@ -421,6 +421,16 @@
 
 <script>
 const chartEl = document.getElementById('chart');
+
+// These need to exist before ANYTHING else runs (including chart setup
+// below), since createRsiChart() references barsData/currentTicker
+// immediately when first called - having their declarations any later
+// in the file throws a "used before initialization" error that halts
+// the entire script.
+let currentTicker = 'HPQ';
+let currentTF = 'daily';
+let barsData = [];
+
 const chart = LightweightCharts.createChart(chartEl, {
   layout: {
     background: { color: '#ffffff' },
@@ -616,9 +626,6 @@ const TIMEFRAME_META = {
   quarterly: { intraday: false, label: 'Quarterly' },
 };
 
-let currentTicker = 'HPQ';
-let currentTF = 'daily';
-let barsData = [];
 let markers = [];
 let crossoverMarkers = [];
 let priceLines = [];

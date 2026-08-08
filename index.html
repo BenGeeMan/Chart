@@ -157,7 +157,7 @@
   }
   #turnover-box {
     position: absolute;
-    bottom: 28px;
+    top: calc(75% + 6px);
     left: 0;
     z-index: 5;
     font-size: 11px;
@@ -212,6 +212,22 @@
     font-family: var(--mono);
     color: var(--text);
     font-weight: 600;
+  }
+  #earnings-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 4;
+    pointer-events: none;
+  }
+  .earnings-triangle {
+    position: absolute;
+    bottom: 22px;
+    width: 0;
+    height: 0;
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+    border-bottom: 8px solid #ff9800;
+    transform: translateX(-50%);
   }
 
   #sidebar {
@@ -340,6 +356,7 @@
       <div class="row"><span class="label">AT (3)</span><span class="value" id="turnover-daily-at3">—</span></div>
       <div class="row"><span class="label">AT (20)</span><span class="value" id="turnover-daily-at20">—</span></div>
     </div>
+    <div id="earnings-overlay"></div>
     <div id="chart"></div>
   </div>
 
@@ -418,31 +435,14 @@ const crossoverSeries = chart.addLineSeries({
   crosshairMarkerVisible: false,
 });
 
-// Same trick again for earnings markers - an invisible line series that
-// only exists to host "E" badge markers. Given its own dedicated,
-// fixed-range price scale (matching the volume panel's own visual
-// band), so badges always sit at the exact same height from the
-// bottom of that panel - not tied to real price or volume data at all.
-// TradingView's house-shaped "E" icon isn't a shape Lightweight Charts
-// can draw natively; this uses a labeled circle badge instead.
-const earningsSeries = chart.addLineSeries({
-  color: 'rgba(0,0,0,0)',
-  lineWidth: 1,
-  priceScaleId: 'earnings_overlay',
-  priceLineVisible: false,
-  lastValueVisible: false,
-  crosshairMarkerVisible: false,
-});
-chart.priceScale('earnings_overlay').applyOptions({ scaleMargins: { top: 0.75, bottom: 0 }, visible: false });
 let earningsData = {};
+let earningsVisible = true;
 
 fetch('chart_earnings.json')
   .then(r => r.json())
   .then(data => {
     earningsData = data;
-    if (barsData.length) {
-      earningsSeries.setMarkers(computeEarningsMarkers(barsData, TIMEFRAME_META[currentTF].intraday));
-    }
+    renderEarningsOverlay();
   })
   .catch(() => setStatus('Could not load chart_earnings.json.', true));
 
@@ -554,25 +554,44 @@ function refreshMarkers() {
 // those bars span a whole period rather than a single day). Only shown
 // on daily-and-above timeframes - not intraday, where "which bar"
 // stops being a meaningful question for a single earnings date.
-function computeEarningsMarkers(data, isIntraday) {
+function findEarningsBarTimes(data) {
   const entries = earningsData[currentTicker];
-  if (isIntraday || !entries) return [];
+  if (!entries) return [];
   const out = [];
   for (const e of entries) {
-    let barTime = null;
     for (let i = data.length - 1; i >= 0; i--) {
-      if (data[i].time <= e.date) { barTime = data[i].time; break; }
+      if (data[i].time <= e.date) { out.push(data[i].time); break; }
     }
-    if (barTime === null) continue;
-    out.push({
-      time: barTime,
-      position: 'inBar',
-      shape: 'arrowUp',
-      color: '#ff9800',
-      text: '',
-    });
   }
   return out;
+}
+
+// Draws earnings triangles as plain HTML elements positioned at an
+// exact pixel distance from the bottom of the chart - NOT using
+// Lightweight Charts' own marker/scale system. After repeated attempts
+// to get a consistent fixed height using the library's built-in scale
+// margins didn't produce predictable, verifiable results, this gives
+// direct control: the X position comes from the chart's own
+// time-to-pixel conversion (so it stays correctly aligned with the
+// data), but the Y position is a plain, fixed CSS value - guaranteed
+// to always be the same distance from the bottom, regardless of
+// ticker, timeframe, or how Lightweight Charts internally scales
+// anything else.
+function renderEarningsOverlay() {
+  const container = document.getElementById('earnings-overlay');
+  container.innerHTML = '';
+  if (!earningsVisible || !barsData.length) return;
+  if (TIMEFRAME_META[currentTF].intraday) return;
+
+  const barTimes = findEarningsBarTimes(barsData);
+  for (const barTime of barTimes) {
+    const x = chart.timeScale().timeToCoordinate(barTime);
+    if (x === null) continue;
+    const el = document.createElement('div');
+    el.className = 'earnings-triangle';
+    el.style.left = x + 'px';
+    container.appendChild(el);
+  }
 }
 
 function loadTimeframe(tf) {
@@ -616,18 +635,7 @@ function loadTimeframe(tf) {
       crossoverMarkers = computeCrossoverMarkers(data);
       crossoverSeries.setData(data.filter(d => d.ema_10 != null).map(d => ({ time: d.time, value: d.ema_10 })));
       crossoverSeries.setMarkers(crossoverMarkers);
-      // Earnings badges always sit at the SAME fixed distance from the
-      // bottom of the volume panel - completely independent of ticker,
-      // timeframe, or actual price/volume values. Two "anchor" points
-      // fix this scale's range to always be exactly 0-11; every real
-      // badge sits at a constant value of 1 within that fixed range
-      // (close to the bottom, per your marked reference).
-      const earningsAnchoredData = data.map((d, i) => ({
-        time: d.time,
-        value: (i === 0) ? 0 : (i === data.length - 1) ? 11 : 1,
-      }));
-      earningsSeries.setData(earningsAnchoredData);
-      earningsSeries.setMarkers(computeEarningsMarkers(data, cfg.intraday));
+      renderEarningsOverlay();
       refreshMarkers();
       for (const pl of priceLines) series.removePriceLine(pl.lwcHandle);
       priceLines = [];
@@ -700,12 +708,17 @@ document.querySelectorAll('.tf-btn').forEach(btn => {
 });
 
 // Toggle individual EMA / turnover-EMA lines on and off from the legend.
-const toggleableSeries = { ...emaSeries, ema_cross: crossoverSeries, earnings: earningsSeries, turnover: turnoverSeries, turnover_ema: turnoverEmaSeries };
+const toggleableSeries = { ...emaSeries, ema_cross: crossoverSeries, turnover: turnoverSeries, turnover_ema: turnoverEmaSeries };
 document.querySelectorAll('#legend .ind-row[data-series]').forEach(row => {
   const key = row.dataset.series;
   const checkbox = row.querySelector('input');
   checkbox.addEventListener('change', () => {
-    toggleableSeries[key].applyOptions({ visible: checkbox.checked });
+    if (key === 'earnings') {
+      earningsVisible = checkbox.checked;
+      renderEarningsOverlay();
+    } else {
+      toggleableSeries[key].applyOptions({ visible: checkbox.checked });
+    }
     row.classList.toggle('off', !checkbox.checked);
   });
 });
@@ -848,7 +861,13 @@ document.getElementById('copy-btn').addEventListener('click', () => {
 
 window.addEventListener('resize', () => {
   chart.applyOptions({ width: chartEl.clientWidth, height: chartEl.clientHeight });
+  renderEarningsOverlay();
 });
+
+// Earnings triangles are plain HTML, not native chart elements, so they
+// need to be manually repositioned whenever the visible time range
+// changes (panning, zooming, scrolling).
+chart.timeScale().subscribeVisibleLogicalRangeChange(() => renderEarningsOverlay());
 
 loadTimeframe('daily');
 loadDailySnapshot(currentTicker);

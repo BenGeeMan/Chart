@@ -293,8 +293,8 @@
       <label class="ind-row" data-series="ema_200"><input type="checkbox" checked><span class="swatch" style="background:#ef5350"></span>EMA 200</label>
       <label class="ind-row" data-series="ema_cross"><input type="checkbox" checked><span class="swatch" style="background:#ff9800;width:7px;height:7px;border-radius:50%;"></span>10/20 EMA cross</label>
       <label class="ind-row" data-series="earnings"><input type="checkbox" checked><span class="swatch" style="background:#009688;width:7px;height:7px;"></span>Earnings (daily+ only)</label>
-      <label class="ind-row" data-series="turnover" style="margin-top:4px;"><input type="checkbox" checked>Turnover (bars, red/teal by direction)</label>
-      <label class="ind-row" data-series="turnover_ema"><input type="checkbox" checked><span class="swatch dashed" style="border-color:#5b8ff9"></span>Turnover EMA 20</label>
+      <label class="ind-row" data-series="turnover" style="margin-top:4px;"><input type="checkbox" checked>Volume (bars, red/teal by direction)</label>
+      <label class="ind-row" data-series="turnover_ema"><input type="checkbox" checked><span class="swatch dashed" style="border-color:#5b8ff9"></span>Volume EMA 20</label>
     </div>
     <div id="turnover-box">
       <div class="row"><span class="label">LT</span><span class="value" id="turnover-lt">—</span></div>
@@ -409,11 +409,12 @@ fetch('chart_earnings.json')
 // close price, using the same recursive formula (seed = first value,
 // then price*k + prev*(1-k)) that the Python pipeline used, so the
 // result matches what a server-side calculation would have produced.
-function calculateEMA(bars, period) {
+// Also used for the volume EMA lines below (field='volume').
+function calculateEMA(bars, period, field = 'close') {
   const k = 2 / (period + 1);
   let prev = null;
   return bars.map(bar => {
-    prev = prev === null ? bar.close : bar.close * k + prev * (1 - k);
+    prev = prev === null ? bar[field] : bar[field] * k + prev * (1 - k);
     return { time: bar.time, value: prev };
   });
 }
@@ -453,14 +454,27 @@ let markers = [];
 let crossoverMarkers = [];
 let priceLines = [];
 let watchlistData = [];
+let currentVolumeEma3 = [];
+let currentVolumeEma20 = [];
 
-function formatTurnover(value) {
+function formatVolume(value) {
   if (value == null || isNaN(value)) return '—';
   const abs = Math.abs(value);
-  if (abs >= 1e9) return '$' + (value / 1e9).toFixed(2) + 'B';
-  if (abs >= 1e6) return '$' + (value / 1e6).toFixed(2) + 'M';
-  if (abs >= 1e3) return '$' + (value / 1e3).toFixed(2) + 'K';
-  return '$' + value.toFixed(2);
+  if (abs >= 1e9) return (value / 1e9).toFixed(2) + 'B';
+  if (abs >= 1e6) return (value / 1e6).toFixed(2) + 'M';
+  if (abs >= 1e3) return (value / 1e3).toFixed(2) + 'K';
+  return value.toFixed(0);
+}
+
+// Updates the LT/AT(3)/AT(20) box for whichever bar index is given.
+// Called with the last bar by default, and from the crosshair-move
+// handler below whenever the user hovers a different bar.
+function updateTurnoverBox(index) {
+  const bar = barsData[index];
+  if (!bar) return;
+  document.getElementById('turnover-lt').textContent = formatVolume(bar.volume);
+  document.getElementById('turnover-at3').textContent = formatVolume(currentVolumeEma3[index] ? currentVolumeEma3[index].value : null);
+  document.getElementById('turnover-at20').textContent = formatVolume(currentVolumeEma20[index] ? currentVolumeEma20[index].value : null);
 }
 
 // A dot wherever the 10 EMA crosses the 20 EMA (either direction) -
@@ -535,10 +549,12 @@ function loadTimeframe(tf) {
       emaSeries.ema_200.setData(calculateEMA(data, 200));
       turnoverSeries.setData(data.map(d => ({
         time: d.time,
-        value: d.turnover,
+        value: d.volume,
         color: d.close >= d.open ? 'rgba(38,166,154,0.45)' : 'rgba(239,83,80,0.45)',
       })));
-      turnoverEmaSeries.setData(data.filter(d => d.turnover_ema_20 != null).map(d => ({ time: d.time, value: d.turnover_ema_20 })));
+      currentVolumeEma3 = calculateEMA(data, 3, 'volume');
+      currentVolumeEma20 = calculateEMA(data, 20, 'volume');
+      turnoverEmaSeries.setData(currentVolumeEma20);
 
       chart.applyOptions({ timeScale: { timeVisible: cfg.intraday, borderColor: '#e0e3eb' } });
       chart.timeScale().fitContent();
@@ -551,9 +567,7 @@ function loadTimeframe(tf) {
       document.getElementById('legend-headline').innerHTML =
         `${currentTicker} · ${cfg.label} &nbsp; <span class="${changeClass}">${sign}${change.toFixed(2)} (${sign}${pct.toFixed(2)}%)</span>`;
 
-      document.getElementById('turnover-lt').textContent = formatTurnover(last.turnover);
-      document.getElementById('turnover-at3').textContent = formatTurnover(last.turnover_ema_3);
-      document.getElementById('turnover-at20').textContent = formatTurnover(last.turnover_ema_20);
+      updateTurnoverBox(barsData.length - 1);
 
       markers = [];
       crossoverMarkers = computeCrossoverMarkers(data);
@@ -723,6 +737,18 @@ function updateOutputBox() {
   }
   document.getElementById('output-box').value = lines.length ? lines.join('\n') : '';
 }
+
+// Updates the LT/AT(3)/AT(20) box to whichever bar the crosshair is
+// currently over, falling back to the latest bar when the cursor
+// leaves the chart entirely.
+chart.subscribeCrosshairMove(param => {
+  if (!param.time) {
+    updateTurnoverBox(barsData.length - 1);
+    return;
+  }
+  const index = barsData.findIndex(b => b.time === param.time);
+  if (index !== -1) updateTurnoverBox(index);
+});
 
 chart.subscribeClick(param => {
   if (!param.time) return;

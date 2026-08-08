@@ -183,7 +183,7 @@
   #turnover-box-daily {
     position: absolute;
     top: 10px;
-    right: 12px;
+    left: 12px;
     z-index: 5;
     font-size: 11px;
     line-height: 1.7;
@@ -335,7 +335,7 @@
       <div class="row"><span class="label">AT (20)</span><span class="value" id="turnover-at20">—</span></div>
     </div>
     <div id="turnover-box-daily">
-      <div class="ind-title">Daily (always)</div>
+      <div class="ind-title">Current daily</div>
       <div class="row"><span class="label">LT</span><span class="value" id="turnover-daily-lt">—</span></div>
       <div class="row"><span class="label">AT (3)</span><span class="value" id="turnover-daily-at3">—</span></div>
       <div class="row"><span class="label">AT (20)</span><span class="value" id="turnover-daily-at20">—</span></div>
@@ -571,7 +571,7 @@ function computeEarningsMarkers(data, isIntraday) {
     if (barTime === null) continue;
     out.push({
       time: barTime,
-      position: 'aboveBar',
+      position: 'inBar',
       shape: 'circle',
       color: '#ff9800',
       text: 'E',
@@ -621,7 +621,19 @@ function loadTimeframe(tf) {
       crossoverMarkers = computeCrossoverMarkers(data);
       crossoverSeries.setData(data.filter(d => d.ema_10 != null).map(d => ({ time: d.time, value: d.ema_10 })));
       crossoverSeries.setMarkers(crossoverMarkers);
-      earningsSeries.setData(data.map(d => ({ time: d.time, value: d.volume })));
+      // Earnings badges always sit at the SAME fixed distance from the
+      // bottom of the panel, regardless of ticker or timeframe. This uses
+      // synthetic values (not real volume data) on the earnings series'
+      // own dedicated scale: two "anchor" points fix that scale's range
+      // to always be exactly 0-11, and every actual badge sits at a
+      // constant value of 5 within that fixed range (roughly mid-height,
+      // so it overlays within the volume bars rather than floating above
+      // them) - its relative (and therefore pixel) position never changes.
+      const earningsAnchoredData = data.map((d, i) => ({
+        time: d.time,
+        value: (i === 0) ? 0 : (i === data.length - 1) ? 11 : 5,
+      }));
+      earningsSeries.setData(earningsAnchoredData);
       earningsSeries.setMarkers(computeEarningsMarkers(data, cfg.intraday));
       refreshMarkers();
       for (const pl of priceLines) series.removePriceLine(pl.lwcHandle);
@@ -847,6 +859,15 @@ window.addEventListener('resize', () => {
 
 loadTimeframe('daily');
 loadDailySnapshot(currentTicker);
+
+// Position the daily snapshot box directly below the indicator legend
+// (rather than a guessed fixed offset), so it never overlaps the
+// checkboxes above it even if that list's length changes later.
+function positionDailyBox() {
+  const legendHeight = document.getElementById('legend').offsetHeight;
+  document.getElementById('turnover-box-daily').style.top = (legendHeight + 20) + 'px';
+}
+positionDailyBox();
 </script>
 </body>
 </html>

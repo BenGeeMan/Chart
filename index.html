@@ -428,8 +428,8 @@ const chart = LightweightCharts.createChart(chartEl, {
     fontFamily: "-apple-system, 'Trebuchet MS', Roboto, Helvetica, Arial, sans-serif",
   },
   grid: {
-    vertLines: { color: '#f0f3fa' },
-    horzLines: { color: '#f0f3fa' },
+    vertLines: { visible: false },
+    horzLines: { visible: false },
   },
   crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
   rightPriceScale: { borderColor: '#e0e3eb', mode: LightweightCharts.PriceScaleMode.Logarithmic },
@@ -529,12 +529,12 @@ const rsiChart = LightweightCharts.createChart(rsiChartEl, {
     fontFamily: "-apple-system, 'Trebuchet MS', Roboto, Helvetica, Arial, sans-serif",
   },
   grid: {
-    vertLines: { color: '#f0f3fa' },
-    horzLines: { color: '#f0f3fa' },
+    vertLines: { visible: false },
+    horzLines: { visible: false },
   },
   crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
   rightPriceScale: { borderColor: '#e0e3eb' },
-  timeScale: { borderColor: '#e0e3eb', visible: true },
+  timeScale: { visible: false },
 });
 const rsiSeries = rsiChart.addLineSeries({
   color: '#131722',

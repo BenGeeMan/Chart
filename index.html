@@ -398,7 +398,7 @@
       </div>
       <div id="earnings-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">5</div>
+      <div id="build-number">6</div>
     </div>
     <div id="rsi-chart-container">
       <div id="rsi-chart"></div>
@@ -549,14 +549,23 @@ const turnoverEmaSeries = chart.addLineSeries({
 // getting stuck if it's ever resized while its container is display:none),
 // this instance is fully destroyed and recreated fresh every time RSI is
 // toggled back on - see setRsiEnabled() below.
-const rsiChartEl = document.getElementById('rsi-chart');
+let rsiChartEl = document.getElementById('rsi-chart');
 let rsiChart = null;
 let rsiSeries = null;
 let syncingFromMain = false, syncingFromRsi = false;
 
 function createRsiChart() {
-  rsiChartEl.innerHTML = ''; // guarantee no leftover canvas from a previous instance
-  console.log('[RSI DEBUG] rsiChartEl children after clear:', rsiChartEl.children.length);
+  // Replace the container element ENTIRELY (not just clear its
+  // contents) - testing whether the library attaches some internal
+  // state directly to the DOM element itself, which innerHTML='' would
+  // not remove, and which might be interfering with a fresh chart
+  // created in the same reused element.
+  const parent = rsiChartEl.parentElement;
+  const freshEl = document.createElement('div');
+  freshEl.id = 'rsi-chart';
+  parent.replaceChild(freshEl, rsiChartEl);
+  rsiChartEl = freshEl;
+  console.log('[RSI DEBUG] rsiChartEl replaced with a fresh element. children:', rsiChartEl.children.length);
   rsiChart = LightweightCharts.createChart(rsiChartEl, {
     layout: {
       background: { color: '#ffffff' },

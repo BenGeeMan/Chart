@@ -96,8 +96,8 @@
   }
   #rsi-tf-buttons {
     position: absolute;
-    top: 2px;
-    right: 12px;
+    top: 1px;
+    left: 68px;
     z-index: 5;
     display: flex;
     gap: 1px;
@@ -279,6 +279,21 @@
     z-index: 3;
     user-select: none;
   }
+  #main-no-data, #rsi-no-data {
+    display: none;
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-weight: 700;
+    color: rgba(0,0,0,0.12);
+    pointer-events: none;
+    z-index: 3;
+    user-select: none;
+  }
+  #main-no-data { font-size: 40px; }
+  #rsi-no-data { font-size: 22px; }
+  #main-no-data.show, #rsi-no-data.show { display: block; }
   #earnings-overlay {
     position: absolute;
     inset: 0;
@@ -435,7 +450,8 @@
       </div>
       <div id="earnings-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">15</div>
+      <div id="build-number">16</div>
+      <div id="main-no-data">No Data</div>
     </div>
     <div id="rsi-chart-container">
       <div id="rsi-label">RSI (14)</div>
@@ -449,6 +465,7 @@
         <button class="rsi-tf-btn" data-tf="quarterly">Q</button>
       </div>
       <div id="rsi-chart"></div>
+      <div id="rsi-no-data">No Data</div>
     </div>
   </div>
 
@@ -656,6 +673,12 @@ function loadRsiData(tf) {
   fetch(`${currentTicker.toLowerCase()}_${tf}.json`)
     .then(r => r.json())
     .then(data => {
+      if (!data || data.length === 0) {
+        document.getElementById('rsi-no-data').classList.add('show');
+        rsiSeries.setData([]);
+        return;
+      }
+      document.getElementById('rsi-no-data').classList.remove('show');
       rsiSeries.setData(calculateRSI(data, 14));
       if (tf === currentTF) {
         const mainRange = chart.timeScale().getVisibleLogicalRange();
@@ -664,7 +687,10 @@ function loadRsiData(tf) {
         rsiChart.timeScale().fitContent();
       }
     })
-    .catch(() => setStatus(`Could not load ${currentTicker.toLowerCase()}_${tf}.json for RSI.`, true));
+    .catch(() => {
+      document.getElementById('rsi-no-data').classList.add('show');
+      setStatus(`Could not load ${currentTicker.toLowerCase()}_${tf}.json for RSI.`, true);
+    });
 }
 
 document.querySelectorAll('.rsi-tf-btn').forEach(btn => {
@@ -834,6 +860,12 @@ function loadTimeframe(tf) {
   fetch(file)
     .then(r => r.json())
     .then(data => {
+      if (!data || data.length === 0) {
+        document.getElementById('main-no-data').classList.add('show');
+        setStatus(`No data available for ${cfg.label}.`, true);
+        return;
+      }
+      document.getElementById('main-no-data').classList.remove('show');
       currentTF = tf;
       barsData = data;
 
@@ -881,6 +913,7 @@ function loadTimeframe(tf) {
       setStatus(`Switched to ${cfg.label}. Drawings were cleared - this is a new resolution.`, false);
     })
     .catch(err => {
+      document.getElementById('main-no-data').classList.add('show');
       setStatus(`Could not load ${file} — make sure it's in the same folder as this HTML file.`, true);
     });
 }

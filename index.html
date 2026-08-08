@@ -157,7 +157,7 @@
   }
   #turnover-box {
     position: absolute;
-    top: calc(75% + 6px);
+    bottom: 0;
     left: 0;
     z-index: 5;
     font-size: 11px;
@@ -182,7 +182,7 @@
   }
   #turnover-box-daily {
     position: absolute;
-    top: 10px;
+    top: 0;
     right: 12px;
     z-index: 5;
     font-size: 11px;
@@ -591,14 +591,20 @@ function renderEarningsOverlay() {
   if (!earningsVisible || !barsData.length) return;
   if (TIMEFRAME_META[currentTF].intraday) return;
 
-  const chartWidth = chartEl.clientWidth;
+  // The right edge of the actual PLOTTABLE chart area sits before the
+  // price-axis label gutter (e.g. "15.42"), not at the full width of
+  // the chart element - that gutter is included in chartEl's own
+  // width. Also leaving room for the badge's own rendered width (it's
+  // centered via translateX(-50%), so half of it can extend past its
+  // center point even when that center point looks "in bounds").
+  const priceScaleWidth = chart.priceScale('right').width();
+  const badgeHalfWidth = 8;
+  const maxX = chartEl.clientWidth - priceScaleWidth - badgeHalfWidth;
+
   const barTimes = findEarningsBarTimes(barsData);
   for (const barTime of barTimes) {
     const x = chart.timeScale().timeToCoordinate(barTime);
-    // Explicit bounds check - timeToCoordinate can return a real (but
-    // way out-of-view) pixel value instead of null for edge cases, so
-    // checking for null alone isn't enough to keep badges on-screen.
-    if (x === null || x < 0 || x > chartWidth) continue;
+    if (x === null || x < badgeHalfWidth || x > maxX) continue;
     const el = document.createElement('div');
     el.className = 'earnings-badge';
     el.textContent = 'E';
@@ -649,6 +655,7 @@ function loadTimeframe(tf) {
       crossoverSeries.setData(data.filter(d => d.ema_10 != null).map(d => ({ time: d.time, value: d.ema_10 })));
       crossoverSeries.setMarkers(crossoverMarkers);
       renderEarningsOverlay();
+      positionDailyBox();
       refreshMarkers();
       for (const pl of priceLines) series.removePriceLine(pl.lwcHandle);
       priceLines = [];
@@ -875,12 +882,23 @@ document.getElementById('copy-btn').addEventListener('click', () => {
 window.addEventListener('resize', () => {
   chart.applyOptions({ width: chartEl.clientWidth, height: chartEl.clientHeight });
   renderEarningsOverlay();
+  positionDailyBox();
 });
 
 // Earnings triangles are plain HTML, not native chart elements, so they
 // need to be manually repositioned whenever the visible time range
 // changes (panning, zooming, scrolling).
 chart.timeScale().subscribeVisibleLogicalRangeChange(() => renderEarningsOverlay());
+
+// Keeps the top-right "Current daily" box clear of the price axis labels
+// on the right - the axis width varies by ticker (e.g. "$379.13" is
+// wider than "$11.37"), so this is measured directly rather than
+// guessed as a fixed pixel value.
+function positionDailyBox() {
+  const priceScaleWidth = chart.priceScale('right').width();
+  document.getElementById('turnover-box-daily').style.right = (priceScaleWidth + 8) + 'px';
+}
+positionDailyBox();
 
 loadTimeframe('daily');
 loadDailySnapshot(currentTicker);

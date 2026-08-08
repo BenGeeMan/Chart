@@ -607,7 +607,7 @@
       </div>
       <div id="earnings-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">34</div>
+      <div id="build-number">35</div>
       <div id="main-no-data">No Data</div>
     </div>
     <div id="rsi-chart-container">
@@ -1030,12 +1030,11 @@ function updateHeadlineStats(index) {
   const rangeWithGap = prevBar
     ? Math.max(bar.high, prevBar.close) - Math.min(bar.low, prevBar.close)
     : bar.high - bar.low;
-  const changeClass = change >= 0 ? 'change-up' : 'change-down';
-  const sign = change >= 0 ? '+' : '';
+  const sign = change >= 0 ? '+' : '-';
   const label = TIMEFRAME_META[currentTF].label;
   document.getElementById('legend-headline').innerHTML =
-    `${currentTicker} · ${label} &nbsp; <span class="${changeClass}">${sign}${change.toFixed(2)} (${sign}${pct.toFixed(2)}%)</span>` +
-    ` &nbsp; Range: ${rangeWithGap.toFixed(2)} &nbsp; Vol: ${formatVolume(bar.volume)}`;
+    `${currentTicker} · ${label} &nbsp; ${sign}${Math.abs(change).toFixed(2)} (${sign}${Math.abs(pct).toFixed(2)}%)` +
+    ` &nbsp; ${sign}${rangeWithGap.toFixed(2)} &nbsp; Vol: ${formatVolume(bar.volume)}`;
 }
 
 function updateTurnoverBox(index) {

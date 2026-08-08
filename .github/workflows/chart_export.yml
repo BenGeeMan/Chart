@@ -1,0 +1,27 @@
+
+# ==========================================
+# FILE: .github/workflows/chart_export.yml
+# ==========================================
+ 
+name: Chart Export
+ 
+# Manual trigger only - run this whenever you want a fresh zip of
+# everything currently in the repo, e.g. to hand to Claude for context.
+on:
+  workflow_dispatch:
+ 
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+ 
+      - name: Zip everything in the repo
+        run: zip -r chart_export.zip . -x ".git/*"
+ 
+      - name: Upload the zip as a downloadable file
+        uses: actions/upload-artifact@v4
+        with:
+          name: chart-export
+          path: chart_export.zip

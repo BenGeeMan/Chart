@@ -398,7 +398,7 @@
       </div>
       <div id="earnings-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">2</div>
+      <div id="build-number">3</div>
     </div>
     <div id="rsi-chart-container">
       <div id="rsi-chart"></div>
@@ -556,6 +556,7 @@ let syncingFromMain = false, syncingFromRsi = false;
 
 function createRsiChart() {
   rsiChartEl.innerHTML = ''; // guarantee no leftover canvas from a previous instance
+  console.log('[RSI DEBUG] rsiChartEl children after clear:', rsiChartEl.children.length);
   rsiChart = LightweightCharts.createChart(rsiChartEl, {
     layout: {
       background: { color: '#ffffff' },
@@ -572,6 +573,9 @@ function createRsiChart() {
     width: rsiChartEl.clientWidth,
     height: rsiChartEl.clientHeight,
   });
+  console.log('[RSI DEBUG] rsiChartEl children after createChart:', rsiChartEl.children.length, '- innerHTML length:', rsiChartEl.innerHTML.length);
+  console.log('[RSI DEBUG] rsiChartEl computed style display/visibility:', getComputedStyle(rsiChartEl).display, getComputedStyle(rsiChartEl).visibility);
+  console.log('[RSI DEBUG] container computed style:', getComputedStyle(document.getElementById('rsi-chart-container')).display, getComputedStyle(document.getElementById('rsi-chart-container')).height);
   rsiSeries = rsiChart.addLineSeries({
     color: '#131722',
     lineWidth: 1,
@@ -582,8 +586,11 @@ function createRsiChart() {
   rsiSeries.createPriceLine({ price: 60, color: '#c0c4cc', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, axisLabelVisible: true, title: '' });
   rsiSeries.createPriceLine({ price: 40, color: '#c0c4cc', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, axisLabelVisible: true, title: '' });
 
+  console.log('[RSI DEBUG] barsData.length at this point:', barsData.length);
   if (barsData.length) {
-    rsiSeries.setData(calculateRSI(barsData, 14));
+    const rsiData = calculateRSI(barsData, 14);
+    console.log('[RSI DEBUG] calculated RSI points:', rsiData.length, '- sample:', rsiData[rsiData.length - 1]);
+    rsiSeries.setData(rsiData);
   }
   const mainRange = chart.timeScale().getVisibleLogicalRange();
   if (mainRange) rsiChart.timeScale().setVisibleLogicalRange(mainRange);

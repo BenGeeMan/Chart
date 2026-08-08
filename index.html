@@ -218,16 +218,24 @@
     inset: 0;
     z-index: 4;
     pointer-events: none;
+    overflow: hidden;
   }
-  .earnings-triangle {
+  .earnings-badge {
     position: absolute;
-    bottom: 22px;
-    width: 0;
-    height: 0;
-    border-left: 5px solid transparent;
-    border-right: 5px solid transparent;
-    border-bottom: 8px solid #ff9800;
+    bottom: 38px;
+    width: 15px;
+    height: 15px;
+    background: #ff9800;
+    clip-path: polygon(50% 0%, 100% 38%, 100% 100%, 0% 100%, 0% 38%);
     transform: translateX(-50%);
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    padding-bottom: 1px;
+    font-size: 8px;
+    font-weight: 700;
+    color: #ffffff;
+    line-height: 1;
   }
 
   #sidebar {
@@ -341,7 +349,7 @@
       <label class="ind-row" data-series="ema_50"><input type="checkbox" checked><span class="swatch" style="background:#26a69a"></span>EMA 50</label>
       <label class="ind-row" data-series="ema_200"><input type="checkbox" checked><span class="swatch" style="background:#ef5350"></span>EMA 200</label>
       <label class="ind-row" data-series="ema_cross"><input type="checkbox" checked><span class="swatch" style="background:#ff9800;width:7px;height:7px;border-radius:50%;"></span>10/20 EMA cross</label>
-      <label class="ind-row" data-series="earnings"><input type="checkbox" checked><span class="swatch" style="width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;border-bottom:7px solid #ff9800;background:none;"></span>Earnings (daily+ only)</label>
+      <label class="ind-row" data-series="earnings"><input type="checkbox" checked><span class="swatch" style="width:9px;height:9px;background:#ff9800;clip-path:polygon(50% 0%,100% 38%,100% 100%,0% 100%,0% 38%);"></span>Earnings (daily+ only)</label>
       <label class="ind-row" data-series="turnover" style="margin-top:4px;"><input type="checkbox" checked>Volume (bars, red/teal by direction)</label>
       <label class="ind-row" data-series="turnover_ema"><input type="checkbox" checked><span class="swatch dashed" style="border-color:#5b8ff9"></span>Volume EMA 20</label>
     </div>
@@ -583,12 +591,17 @@ function renderEarningsOverlay() {
   if (!earningsVisible || !barsData.length) return;
   if (TIMEFRAME_META[currentTF].intraday) return;
 
+  const chartWidth = chartEl.clientWidth;
   const barTimes = findEarningsBarTimes(barsData);
   for (const barTime of barTimes) {
     const x = chart.timeScale().timeToCoordinate(barTime);
-    if (x === null) continue;
+    // Explicit bounds check - timeToCoordinate can return a real (but
+    // way out-of-view) pixel value instead of null for edge cases, so
+    // checking for null alone isn't enough to keep badges on-screen.
+    if (x === null || x < 0 || x > chartWidth) continue;
     const el = document.createElement('div');
-    el.className = 'earnings-triangle';
+    el.className = 'earnings-badge';
+    el.textContent = 'E';
     el.style.left = x + 'px';
     container.appendChild(el);
   }

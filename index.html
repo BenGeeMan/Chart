@@ -523,7 +523,7 @@
       </div>
       <div id="earnings-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">21</div>
+      <div id="build-number">22</div>
       <div id="main-no-data">No Data</div>
     </div>
     <div id="rsi-chart-container">
@@ -560,7 +560,7 @@
 
     <div class="sidebar-section">
       <div class="sidebar-title">Chart State (copy to Claude)</div>
-      <div class="hint">Reflects whatever's currently drawn on the chart.</div>
+      <div class="hint">Reflects the current ticker, timeframe, every indicator's on/off state, and anything drawn on the chart.</div>
       <textarea id="output-box" readonly placeholder="Nothing on the chart yet."></textarea>
       <div class="actions">
         <button id="copy-btn">Copy to clipboard</button>
@@ -872,6 +872,7 @@ function loadRsiData(tf) {
       } else {
         rsiChart.timeScale().fitContent();
       }
+      updateOutputBox();
     })
     .catch(() => {
       document.getElementById('rsi-no-data').classList.add('show');
@@ -1217,6 +1218,7 @@ document.querySelectorAll('#legend .ind-row[data-series]').forEach(row => {
       toggleableSeries[key].applyOptions({ visible: checkbox.checked });
     }
     row.classList.toggle('off', !checkbox.checked);
+    updateOutputBox();
   });
 });
 
@@ -1230,6 +1232,7 @@ document.querySelectorAll('#legend .ind-row[data-mtf-ema]').forEach(row => {
     mtfEmaEnabled[tf] = checkbox.checked;
     loadMtfEma(tf);
     row.classList.toggle('off', !checkbox.checked);
+    updateOutputBox();
   });
 });
 
@@ -1244,6 +1247,7 @@ document.querySelectorAll('#legend .ind-row[data-rel-ema]').forEach(row => {
     relEmaEnabled[key] = checkbox.checked;
     loadRelEma(key, offset);
     row.classList.toggle('off', !checkbox.checked);
+    updateOutputBox();
   });
 });
 
@@ -1352,17 +1356,39 @@ function clearAll() {
 
 function updateOutputBox() {
   const lines = [];
+
+  lines.push('--- Chart Context ---');
+  lines.push(`Ticker: ${currentTicker}`);
+  lines.push(`Main chart timeframe: ${TIMEFRAME_META[currentTF].label}`);
+  lines.push(rsiChart ? `RSI timeframe: ${TIMEFRAME_META[rsiTF].label}${rsiTF !== currentTF ? ' (different from main chart)' : ''}` : 'RSI: off');
+
+  lines.push('');
+  lines.push('--- Indicators ---');
+  document.querySelectorAll('.ind-col').forEach(col => {
+    const title = col.querySelector('.ind-col-title').textContent.trim();
+    const states = [...col.querySelectorAll('.ind-row')].map(row => {
+      const cb = row.querySelector('input[type="checkbox"]');
+      return `${row.textContent.trim()}: ${cb.checked ? 'ON' : 'OFF'}`;
+    });
+    lines.push(`${title} - ${states.join(', ')}`);
+  });
+
+  lines.push('');
+  lines.push('--- Drawings ---');
+  const drawingLines = [];
   for (const m of markers) {
     const pos = m.position === 'belowBar' ? 'below' : 'above';
     const colorName = Object.keys(colorMap).find(k => colorMap[k] === m.color) || 'blue';
     const shapeName = Object.keys(shapeMap).find(k => shapeMap[k] === m.shape) || 'circle';
     const tag = m.source === 'user' ? ' [added by user on chart]' : '';
-    lines.push(`MARKER date=${m.time} pos=${pos} shape=${shapeName} color=${colorName} text="${m.text}"${tag}`);
+    drawingLines.push(`MARKER date=${m.time} pos=${pos} shape=${shapeName} color=${colorName} text="${m.text}"${tag}`);
   }
   for (const pl of priceLines) {
-    lines.push(`LINE price=${pl.price} color=${pl.color} label="${pl.label}"`);
+    drawingLines.push(`LINE price=${pl.price} color=${pl.color} label="${pl.label}"`);
   }
-  document.getElementById('output-box').value = lines.length ? lines.join('\n') : '';
+  lines.push(drawingLines.length ? drawingLines.join('\n') : '(none)');
+
+  document.getElementById('output-box').value = lines.join('\n');
 }
 
 // Updates the LT/AT(3)/AT(20) box to whichever bar the crosshair is

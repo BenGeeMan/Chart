@@ -542,6 +542,7 @@ let rsiSeries = null;
 let syncingFromMain = false, syncingFromRsi = false;
 
 function createRsiChart() {
+  rsiChartEl.innerHTML = ''; // guarantee no leftover canvas from a previous instance
   rsiChart = LightweightCharts.createChart(rsiChartEl, {
     layout: {
       background: { color: '#ffffff' },
@@ -882,11 +883,14 @@ function setRsiEnabled(enabled) {
   document.getElementById('rsi-chart-container').classList.toggle('hidden', !enabled);
   chart.applyOptions({ width: chartEl.clientWidth, height: chartEl.clientHeight });
   if (enabled) {
-    // Wait a frame for the browser to actually finish showing the
-    // panel before creating the chart in it - creating it in the same
-    // tick as un-hiding can still measure a zero-size container.
+    // Double requestAnimationFrame - a well-established technique for
+    // "wait until the browser has genuinely finished laying out AND
+    // painting," which is more reliable than a single frame for this
+    // kind of just-became-visible measurement.
     requestAnimationFrame(() => {
-      createRsiChart();
+      requestAnimationFrame(() => {
+        createRsiChart();
+      });
     });
   } else if (rsiChart) {
     rsiChart.remove();

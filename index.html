@@ -436,6 +436,14 @@
         <label class="ind-row" data-series="turnover" style="margin-top:4px;"><input type="checkbox" checked>Volume (bars, red/teal by direction)</label>
         <label class="ind-row" data-series="turnover_ema"><input type="checkbox" checked><span class="swatch dashed" style="border-color:#5b8ff9"></span>Volume EMA 20</label>
         <label class="ind-row" data-series="rsi" style="margin-top:4px;"><input type="checkbox" checked><span class="swatch" style="background:#131722"></span>RSI (14)</label>
+        <div class="ind-row" style="margin-top:4px; cursor:default; font-size:10px; letter-spacing:0.4px; text-transform:uppercase;">10 EMA - any timeframe</div>
+        <label class="ind-row" data-mtf-ema="m5"><input type="checkbox"><span class="swatch" style="background:#e91e63"></span>10 EMA 5m</label>
+        <label class="ind-row" data-mtf-ema="m15"><input type="checkbox"><span class="swatch" style="background:#fb8c00"></span>10 EMA 15m</label>
+        <label class="ind-row" data-mtf-ema="hourly"><input type="checkbox"><span class="swatch" style="background:#8e24aa"></span>10 EMA 1H</label>
+        <label class="ind-row" data-mtf-ema="daily"><input type="checkbox"><span class="swatch" style="background:#3949ab"></span>10 EMA D</label>
+        <label class="ind-row" data-mtf-ema="weekly"><input type="checkbox"><span class="swatch" style="background:#6d4c41"></span>10 EMA W</label>
+        <label class="ind-row" data-mtf-ema="monthly"><input type="checkbox"><span class="swatch" style="background:#00acc1"></span>10 EMA M</label>
+        <label class="ind-row" data-mtf-ema="quarterly"><input type="checkbox"><span class="swatch" style="background:#7cb342"></span>10 EMA Q</label>
       </div>
       <div id="turnover-box">
         <div class="row"><span class="label">LT</span><span class="value" id="turnover-lt">—</span></div>
@@ -450,7 +458,7 @@
       </div>
       <div id="earnings-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">16</div>
+      <div id="build-number">17</div>
       <div id="main-no-data">No Data</div>
     </div>
     <div id="rsi-chart-container">
@@ -542,6 +550,72 @@ const emaSeries = {
   ema_50:  chart.addLineSeries({ color: '#26a69a', lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false }),
   ema_200: chart.addLineSeries({ color: '#ef5350', lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false }),
 };
+
+// Multi-timeframe EMA(10) overlays - e.g. showing the WEEKLY EMA 10 on
+// top of a DAILY chart. Each is independently toggleable and off by
+// default. Different timeframes use different time formats internally
+// (date strings like "2026-08-07" for daily-and-up, Unix timestamps for
+// intraday) - alignTimeToCurrentChart() below converts between them so
+// an overlay always renders correctly regardless of which timeframe the
+// main chart is currently showing.
+const MTF_EMA_COLORS = {
+  m5: '#e91e63', m15: '#fb8c00', hourly: '#8e24aa',
+  daily: '#3949ab', weekly: '#6d4c41', monthly: '#00acc1', quarterly: '#7cb342',
+};
+const mtfEmaSeries = {};
+const mtfEmaEnabled = {};
+Object.keys(MTF_EMA_COLORS).forEach(tf => {
+  mtfEmaSeries[tf] = chart.addLineSeries({
+    color: MTF_EMA_COLORS[tf], lineWidth: 1, priceLineVisible: false,
+    lastValueVisible: false, crosshairMarkerVisible: false,
+  });
+  mtfEmaEnabled[tf] = false;
+});
+
+function dateStringToTimestamp(dateStr) {
+  return Math.floor(new Date(dateStr + 'T00:00:00Z').getTime() / 1000);
+}
+
+// Converts a computed EMA series' time values to whatever format the
+// CURRENTLY ACTIVE chart is using, so both can coexist on one timeScale.
+function alignTimeToCurrentChart(data) {
+  const currentIsIntraday = TIMEFRAME_META[currentTF].intraday;
+  const sourceIsIntraday = typeof data[0].time === 'number';
+  if (currentIsIntraday === sourceIsIntraday) return data;
+  if (currentIsIntraday && !sourceIsIntraday) {
+    // Overlaying a daily-or-higher EMA onto an intraday chart - convert
+    // each date string to a timestamp at midnight UTC.
+    return data.map(d => ({ time: dateStringToTimestamp(d.time), value: d.value }));
+  }
+  // Overlaying an intraday EMA onto a daily-or-higher chart - convert
+  // timestamps to dates, keeping only the LAST value per calendar day
+  // (a chart series requires unique, increasing time values).
+  const byDate = {};
+  data.forEach(d => {
+    const dateStr = new Date(d.time * 1000).toISOString().slice(0, 10);
+    byDate[dateStr] = d.value;
+  });
+  return Object.keys(byDate).sort().map(dateStr => ({ time: dateStr, value: byDate[dateStr] }));
+}
+
+function loadMtfEma(tf) {
+  if (!mtfEmaEnabled[tf]) {
+    mtfEmaSeries[tf].setData([]);
+    return;
+  }
+  fetch(`${currentTicker.toLowerCase()}_${tf}.json`)
+    .then(r => r.json())
+    .then(data => {
+      if (!data || data.length === 0) { mtfEmaSeries[tf].setData([]); return; }
+      const ema10 = calculateEMA(data, 10, 'close');
+      mtfEmaSeries[tf].setData(alignTimeToCurrentChart(ema10));
+    })
+    .catch(() => setStatus(`Could not load ${tf} EMA 10 overlay.`, true));
+}
+
+function refreshAllEnabledMtfEmas() {
+  Object.keys(mtfEmaEnabled).forEach(tf => { if (mtfEmaEnabled[tf]) loadMtfEma(tf); });
+}
 
 // Dedicated, fully transparent series that ONLY exists to host the EMA
 // 10/20 crossover dots. Kept separate from the actual EMA 10/20 lines so
@@ -911,6 +985,7 @@ function loadTimeframe(tf) {
 
       document.querySelectorAll('.tf-btn').forEach(b => b.classList.toggle('active', b.dataset.tf === tf));
       setStatus(`Switched to ${cfg.label}. Drawings were cleared - this is a new resolution.`, false);
+      refreshAllEnabledMtfEmas();
     })
     .catch(err => {
       document.getElementById('main-no-data').classList.add('show');
@@ -945,6 +1020,7 @@ function switchTicker(ticker) {
   loadTimeframe(currentTF);
   loadDailySnapshot(ticker);
   if (rsiChart) loadRsiData(currentTF);
+  refreshAllEnabledMtfEmas();
 }
 
 function renderWatchlist() {
@@ -991,6 +1067,19 @@ document.querySelectorAll('#legend .ind-row[data-series]').forEach(row => {
     } else {
       toggleableSeries[key].applyOptions({ visible: checkbox.checked });
     }
+    row.classList.toggle('off', !checkbox.checked);
+  });
+});
+
+// Multi-timeframe EMA 10 overlays - each one fetches its own timeframe's
+// data on demand rather than just toggling visibility on an already-set
+// series, since the data isn't loaded at all until first switched on.
+document.querySelectorAll('#legend .ind-row[data-mtf-ema]').forEach(row => {
+  const tf = row.dataset.mtfEma;
+  const checkbox = row.querySelector('input');
+  checkbox.addEventListener('change', () => {
+    mtfEmaEnabled[tf] = checkbox.checked;
+    loadMtfEma(tf);
     row.classList.toggle('off', !checkbox.checked);
   });
 });

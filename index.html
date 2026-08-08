@@ -398,7 +398,7 @@
       </div>
       <div id="earnings-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">4</div>
+      <div id="build-number">5</div>
     </div>
     <div id="rsi-chart-container">
       <div id="rsi-chart"></div>
@@ -914,17 +914,20 @@ function setRsiEnabled(enabled) {
   console.log('[RSI DEBUG] container hidden class is now:', container.classList.contains('hidden'), '- container size:', container.clientWidth, container.clientHeight);
   chart.applyOptions({ width: chartEl.clientWidth, height: chartEl.clientHeight });
   if (enabled) {
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        console.log('[RSI DEBUG] about to createRsiChart(), container size now:', document.getElementById('rsi-chart-container').clientWidth, document.getElementById('rsi-chart-container').clientHeight);
-        try {
-          createRsiChart();
-          console.log('[RSI DEBUG] createRsiChart() completed without throwing. rsiChart is:', rsiChart);
-        } catch (err) {
-          console.error('[RSI DEBUG] createRsiChart() THREW:', err);
-        }
-      });
-    });
+    // Testing a much more generous, explicit delay instead of a couple
+    // of animation frames - the one thing genuinely different about
+    // the initial page load (which works correctly) is that real
+    // wall-clock time passes - a full network fetch - before data
+    // gets set on it.
+    setTimeout(() => {
+      console.log('[RSI DEBUG] about to createRsiChart(), container size now:', document.getElementById('rsi-chart-container').clientWidth, document.getElementById('rsi-chart-container').clientHeight);
+      try {
+        createRsiChart();
+        console.log('[RSI DEBUG] createRsiChart() completed without throwing. rsiChart is:', rsiChart);
+      } catch (err) {
+        console.error('[RSI DEBUG] createRsiChart() THREW:', err);
+      }
+    }, 150);
   } else if (rsiChart) {
     rsiChart.remove();
     rsiChart = null;

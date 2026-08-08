@@ -574,6 +574,7 @@
           </div>
           <div class="ind-col">
             <div class="ind-col-title"><input type="checkbox" class="col-master">Relative M10s</div>
+            <label class="ind-row" data-rel-ema="rel0"><input type="checkbox"><span class="swatch" style="background:#00897b"></span>Current TF</label>
             <label class="ind-row" data-rel-ema="rel1"><input type="checkbox"><span class="swatch" style="background:#f9a825"></span>1 TF above</label>
             <label class="ind-row" data-rel-ema="rel2"><input type="checkbox"><span class="swatch" style="background:#455a64"></span>2 TFs above</label>
           </div>
@@ -606,7 +607,7 @@
       </div>
       <div id="earnings-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">30</div>
+      <div id="build-number">34</div>
       <div id="main-no-data">No Data</div>
     </div>
     <div id="rsi-chart-container">
@@ -742,15 +743,20 @@ function refreshAllEnabledMtfEmas() {
   Object.keys(mtfEmaEnabled).forEach(tf => { if (mtfEmaEnabled[tf]) loadMtfEma(tf); });
 }
 
-// "1 timeframe above" / "2 timeframes above" - these represent WHATEVER
-// timeframe is one or two steps larger than the main chart's CURRENT
-// timeframe, recalculated dynamically. E.g. viewing Daily, "1 above" is
-// Weekly; switch the main chart to Weekly, and "1 above" becomes
-// Monthly automatically - same checkbox, different underlying data.
+// "Current TF" / "1 timeframe above" / "2 timeframes above" - these
+// represent WHATEVER timeframe is 0/1/2 steps larger than the main
+// chart's CURRENT timeframe, recalculated dynamically. E.g. viewing
+// Daily, "1 above" is Weekly; switch the main chart to Weekly, and
+// "1 above" becomes Monthly automatically - same checkbox, different
+// underlying data. "Current TF" (offset 0) is the main chart's own
+// timeframe - the same data as the Standard EMAs' EMA 10, just
+// independently toggleable/colored here for consistency with the rest
+// of this column.
 const TF_ORDER = ['m5', 'm15', 'hourly', 'daily', 'weekly', 'monthly', 'quarterly'];
-const RELATIVE_EMA_COLORS = { rel1: '#f9a825', rel2: '#455a64' };
+const RELATIVE_EMA_COLORS = { rel0: '#00897b', rel1: '#f9a825', rel2: '#455a64' };
 const relEmaSeries = {};
-const relEmaEnabled = { rel1: false, rel2: false };
+const relEmaEnabled = { rel0: false, rel1: false, rel2: false };
+const REL_EMA_OFFSETS = { rel0: 0, rel1: 1, rel2: 2 };
 Object.keys(RELATIVE_EMA_COLORS).forEach(key => {
   relEmaSeries[key] = chart.addLineSeries({
     color: RELATIVE_EMA_COLORS[key], lineWidth: 1, priceLineVisible: false,
@@ -785,8 +791,9 @@ function loadRelEma(key, offset) {
 }
 
 function refreshAllEnabledRelEmas() {
-  if (relEmaEnabled.rel1) loadRelEma('rel1', 1);
-  if (relEmaEnabled.rel2) loadRelEma('rel2', 2);
+  Object.keys(relEmaEnabled).forEach(key => {
+    if (relEmaEnabled[key]) loadRelEma(key, REL_EMA_OFFSETS[key]);
+  });
 }
 
 // Dedicated, fully transparent series that ONLY exists to host the EMA
@@ -1008,6 +1015,29 @@ function formatVolume(value) {
 // Updates the LT/AT(3)/AT(20) box for whichever bar index is given.
 // Called with the last bar by default, and from the crosshair-move
 // handler below whenever the user hovers a different bar.
+// Updates the ticker/timeframe header line to reflect whichever bar the
+// crosshair is over (or the latest bar by default): change and % change
+// vs. that bar's own PREVIOUS close (not the start of the visible
+// range), the bar's total range INCLUDING any overnight gap from the
+// prior close, and that bar's volume.
+function updateHeadlineStats(index) {
+  const bar = barsData[index];
+  if (!bar) return;
+  const prevBar = barsData[index - 1];
+  const prevClose = prevBar ? prevBar.close : bar.open;
+  const change = bar.close - prevClose;
+  const pct = (change / prevClose) * 100;
+  const rangeWithGap = prevBar
+    ? Math.max(bar.high, prevBar.close) - Math.min(bar.low, prevBar.close)
+    : bar.high - bar.low;
+  const changeClass = change >= 0 ? 'change-up' : 'change-down';
+  const sign = change >= 0 ? '+' : '';
+  const label = TIMEFRAME_META[currentTF].label;
+  document.getElementById('legend-headline').innerHTML =
+    `${currentTicker} · ${label} &nbsp; <span class="${changeClass}">${sign}${change.toFixed(2)} (${sign}${pct.toFixed(2)}%)</span>` +
+    ` &nbsp; Range: ${rangeWithGap.toFixed(2)} &nbsp; Vol: ${formatVolume(bar.volume)}`;
+}
+
 function updateTurnoverBox(index) {
   const bar = barsData[index];
   if (!bar) return;
@@ -1135,14 +1165,7 @@ function loadTimeframe(tf) {
       chart.applyOptions({ timeScale: { timeVisible: cfg.intraday, borderColor: '#e0e3eb' } });
       chart.timeScale().fitContent();
 
-      const first = data[0], last = data[data.length - 1];
-      const change = last.close - first.close;
-      const pct = (change / first.close) * 100;
-      const changeClass = change >= 0 ? 'change-up' : 'change-down';
-      const sign = change >= 0 ? '+' : '';
-      document.getElementById('legend-headline').innerHTML =
-        `${currentTicker} · ${cfg.label} &nbsp; <span class="${changeClass}">${sign}${change.toFixed(2)} (${sign}${pct.toFixed(2)}%)</span>`;
-
+      updateHeadlineStats(data.length - 1);
       updateTurnoverBox(barsData.length - 1);
 
       markers = [];
@@ -1157,7 +1180,6 @@ function loadTimeframe(tf) {
       updateOutputBox();
 
       document.querySelectorAll('.tf-btn').forEach(b => b.classList.toggle('active', b.dataset.tf === tf));
-      setStatus(`Switched to ${cfg.label}. Drawings were cleared - this is a new resolution.`, false);
       refreshAllEnabledMtfEmas();
       refreshAllEnabledRelEmas();
     })
@@ -1226,6 +1248,16 @@ fetch('chart_watchlist.json')
 
 document.getElementById('indicators-toggle').addEventListener('click', () => {
   document.getElementById('legend').classList.toggle('expanded');
+});
+
+// Close the indicators panel when clicking anywhere outside it - the
+// toggle button itself is inside #legend too, so this doesn't conflict
+// with its own click handler above.
+document.addEventListener('click', (e) => {
+  const legend = document.getElementById('legend');
+  if (legend.classList.contains('expanded') && !legend.contains(e.target)) {
+    legend.classList.remove('expanded');
+  }
 });
 
 // Column master checkboxes - turning a column off remembers each row's
@@ -1301,7 +1333,7 @@ document.querySelectorAll('#legend .ind-row[data-mtf-ema]').forEach(row => {
 // currently showing rather than being fixed.
 document.querySelectorAll('#legend .ind-row[data-rel-ema]').forEach(row => {
   const key = row.dataset.relEma;
-  const offset = key === 'rel1' ? 1 : 2;
+  const offset = REL_EMA_OFFSETS[key];
   const checkbox = row.querySelector('input');
   checkbox.addEventListener('change', () => {
     relEmaEnabled[key] = checkbox.checked;
@@ -1419,6 +1451,7 @@ const COLOR_NAMES = {
   '255,152,0': 'orange', '233,30,99': 'pink', '251,140,0': 'amber', '142,36,170': 'purple',
   '57,73,171': 'indigo', '109,76,65': 'brown', '0,172,193': 'cyan', '124,179,66': 'light green',
   '249,168,37': 'gold', '69,90,100': 'slate', '91,143,249': 'light blue', '19,23,34': 'black',
+  '0,137,123': 'teal',
 };
 
 function rgbToColorName(rgbString) {
@@ -1483,11 +1516,15 @@ function updateOutputBox() {
 // leaves the chart entirely.
 chart.subscribeCrosshairMove(param => {
   if (!param.time) {
+    updateHeadlineStats(barsData.length - 1);
     updateTurnoverBox(barsData.length - 1);
     return;
   }
   const index = barsData.findIndex(b => b.time === param.time);
-  if (index !== -1) updateTurnoverBox(index);
+  if (index !== -1) {
+    updateHeadlineStats(index);
+    updateTurnoverBox(index);
+  }
 });
 
 // Quick-paste modal - a temporary popup alternative to the old

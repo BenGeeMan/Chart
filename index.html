@@ -400,7 +400,7 @@
       </div>
       <div id="earnings-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">8</div>
+      <div id="build-number">9</div>
     </div>
     <div id="rsi-chart-container">
       <div id="rsi-chart"></div>
@@ -557,17 +557,7 @@ let rsiSeries = null;
 let syncingFromMain = false, syncingFromRsi = false;
 
 function createRsiChart() {
-  // Replace the container element ENTIRELY (not just clear its
-  // contents) - testing whether the library attaches some internal
-  // state directly to the DOM element itself, which innerHTML='' would
-  // not remove, and which might be interfering with a fresh chart
-  // created in the same reused element.
-  const parent = rsiChartEl.parentElement;
-  const freshEl = document.createElement('div');
-  freshEl.id = 'rsi-chart';
-  parent.replaceChild(freshEl, rsiChartEl);
-  rsiChartEl = freshEl;
-  console.log('[RSI DEBUG] rsiChartEl replaced with a fresh element. children:', rsiChartEl.children.length);
+  rsiChartEl.innerHTML = ''; // clean slate in case a previous instance left anything behind
   rsiChart = LightweightCharts.createChart(rsiChartEl, {
     layout: {
       background: { color: '#ffffff' },
@@ -584,9 +574,6 @@ function createRsiChart() {
     width: rsiChartEl.clientWidth,
     height: rsiChartEl.clientHeight,
   });
-  console.log('[RSI DEBUG] rsiChartEl children after createChart:', rsiChartEl.children.length, '- innerHTML length:', rsiChartEl.innerHTML.length);
-  console.log('[RSI DEBUG] rsiChartEl computed style display/visibility:', getComputedStyle(rsiChartEl).display, getComputedStyle(rsiChartEl).visibility);
-  console.log('[RSI DEBUG] container computed style:', getComputedStyle(document.getElementById('rsi-chart-container')).display, getComputedStyle(document.getElementById('rsi-chart-container')).height);
   rsiSeries = rsiChart.addLineSeries({
     color: '#131722',
     lineWidth: 1,
@@ -597,24 +584,12 @@ function createRsiChart() {
   rsiSeries.createPriceLine({ price: 60, color: '#c0c4cc', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, axisLabelVisible: true, title: '' });
   rsiSeries.createPriceLine({ price: 40, color: '#c0c4cc', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, axisLabelVisible: true, title: '' });
 
-  console.log('[RSI DEBUG] barsData.length at this point:', barsData.length);
   if (barsData.length) {
-    const rsiData = calculateRSI(barsData, 14);
-    console.log('[RSI DEBUG] calculated RSI points:', rsiData.length, '- sample:', rsiData[rsiData.length - 1]);
-    rsiSeries.setData(rsiData);
+    rsiSeries.setData(calculateRSI(barsData, 14));
   }
   const mainRange = chart.timeScale().getVisibleLogicalRange();
   if (mainRange) rsiChart.timeScale().setVisibleLogicalRange(mainRange);
   rsiChart.timeScale().fitContent();
-  requestAnimationFrame(() => {
-    rsiChart.applyOptions({ width: rsiChartEl.clientWidth, height: rsiChartEl.clientHeight });
-    const canvases = rsiChartEl.querySelectorAll('canvas');
-    console.log('[RSI DEBUG] canvas count inside rsiChartEl:', canvases.length);
-    canvases.forEach((c, i) => {
-      console.log(`[RSI DEBUG] canvas[${i}] width/height attrs:`, c.width, c.height, '- CSS style width/height:', c.style.width, c.style.height, '- getBoundingClientRect:', JSON.stringify(c.getBoundingClientRect()));
-    });
-    console.log('[RSI DEBUG] rsiChartEl getBoundingClientRect:', JSON.stringify(rsiChartEl.getBoundingClientRect()));
-  });
 
   rsiChart.timeScale().subscribeVisibleLogicalRangeChange(range => {
     if (!range || syncingFromMain) return;
@@ -920,32 +895,15 @@ document.querySelectorAll('#legend .ind-row[data-series]').forEach(row => {
 let rsiEnabled = true;
 
 function setRsiEnabled(enabled) {
-  console.log('[RSI DEBUG] setRsiEnabled called with:', enabled);
   rsiEnabled = enabled;
-  const container = document.getElementById('rsi-chart-container');
-  container.classList.toggle('hidden', !enabled);
-  console.log('[RSI DEBUG] container hidden class is now:', container.classList.contains('hidden'), '- container size:', container.clientWidth, container.clientHeight);
+  document.getElementById('rsi-chart-container').classList.toggle('hidden', !enabled);
   chart.applyOptions({ width: chartEl.clientWidth, height: chartEl.clientHeight });
   if (enabled) {
-    // Testing a much more generous, explicit delay instead of a couple
-    // of animation frames - the one thing genuinely different about
-    // the initial page load (which works correctly) is that real
-    // wall-clock time passes - a full network fetch - before data
-    // gets set on it.
-    setTimeout(() => {
-      console.log('[RSI DEBUG] about to createRsiChart(), container size now:', document.getElementById('rsi-chart-container').clientWidth, document.getElementById('rsi-chart-container').clientHeight);
-      try {
-        createRsiChart();
-        console.log('[RSI DEBUG] createRsiChart() completed without throwing. rsiChart is:', rsiChart);
-      } catch (err) {
-        console.error('[RSI DEBUG] createRsiChart() THREW:', err);
-      }
-    }, 150);
+    requestAnimationFrame(() => createRsiChart());
   } else if (rsiChart) {
     rsiChart.remove();
     rsiChart = null;
     rsiSeries = null;
-    console.log('[RSI DEBUG] RSI chart removed.');
   }
 }
 

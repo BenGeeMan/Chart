@@ -70,6 +70,7 @@
     flex-direction: column;
     background: var(--bg);
     min-height: 0;
+    min-width: 0;
   }
   #main-chart-area {
     position: relative;
@@ -93,6 +94,26 @@
     pointer-events: none;
     user-select: none;
   }
+  #rsi-tf-buttons {
+    position: absolute;
+    top: 2px;
+    right: 12px;
+    z-index: 5;
+    display: flex;
+    gap: 1px;
+  }
+  .rsi-tf-btn {
+    background: transparent;
+    color: var(--text-dim);
+    border: none;
+    border-radius: 3px;
+    padding: 2px 6px;
+    font-size: 10px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .rsi-tf-btn:hover { background: rgba(0,0,0,0.05); color: var(--text); }
+  .rsi-tf-btn.active { background: rgba(41,98,255,0.1); color: var(--accent); }
   #rsi-chart-container.hidden {
     display: none;
   }
@@ -109,6 +130,7 @@
     border-right: 1px solid var(--panel-border);
     overflow-y: auto;
     min-height: 0;
+    min-width: 0;
   }
   .watchlist-title {
     font-size: 11px;
@@ -288,6 +310,7 @@
     display: flex;
     flex-direction: column;
     min-height: 0;
+    min-width: 0;
   }
   .sidebar-section {
     display: flex;
@@ -412,10 +435,19 @@
       </div>
       <div id="earnings-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">14</div>
+      <div id="build-number">15</div>
     </div>
     <div id="rsi-chart-container">
       <div id="rsi-label">RSI (14)</div>
+      <div id="rsi-tf-buttons">
+        <button class="rsi-tf-btn" data-tf="m5">5m</button>
+        <button class="rsi-tf-btn" data-tf="m15">15m</button>
+        <button class="rsi-tf-btn" data-tf="hourly">1H</button>
+        <button class="rsi-tf-btn" data-tf="daily">D</button>
+        <button class="rsi-tf-btn" data-tf="weekly">W</button>
+        <button class="rsi-tf-btn" data-tf="monthly">M</button>
+        <button class="rsi-tf-btn" data-tf="quarterly">Q</button>
+      </div>
       <div id="rsi-chart"></div>
     </div>
   </div>
@@ -570,6 +602,7 @@ let rsiChartEl = document.getElementById('rsi-chart');
 let rsiChart = null;
 let rsiSeries = null;
 let syncingFromMain = false, syncingFromRsi = false;
+let rsiTF = 'daily'; // RSI's own timeframe - independent of the main chart's
 
 function createRsiChart() {
   rsiChartEl.innerHTML = ''; // clean slate in case a previous instance left anything behind
@@ -599,26 +632,51 @@ function createRsiChart() {
   rsiSeries.createPriceLine({ price: 60, color: '#9a9ea6', lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dashed, axisLabelVisible: true, title: '' });
   rsiSeries.createPriceLine({ price: 40, color: '#9a9ea6', lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dashed, axisLabelVisible: true, title: '' });
 
-  if (barsData.length) {
-    rsiSeries.setData(calculateRSI(barsData, 14));
-  }
-  const mainRange = chart.timeScale().getVisibleLogicalRange();
-  if (mainRange) rsiChart.timeScale().setVisibleLogicalRange(mainRange);
-  rsiChart.timeScale().fitContent();
-
   rsiChart.timeScale().subscribeVisibleLogicalRangeChange(range => {
-    if (!range || syncingFromMain) return;
+    // Only push pan/zoom back to the main chart when both are showing
+    // the same timeframe - bar indices don't correspond to the same
+    // thing across different timeframes, so syncing would be meaningless
+    // (and wrong) whenever RSI has its own independent timeframe set.
+    if (!range || syncingFromMain || rsiTF !== currentTF) return;
     syncingFromRsi = true;
     chart.timeScale().setVisibleLogicalRange(range);
     syncingFromRsi = false;
   });
+
+  loadRsiData(rsiTF);
 }
+
+// Fetches RSI's own data independently of whatever the main chart is
+// currently showing, computes RSI(14) from it, and displays it. This
+// is what powers RSI having its own timeframe selector.
+function loadRsiData(tf) {
+  rsiTF = tf;
+  document.querySelectorAll('.rsi-tf-btn').forEach(b => b.classList.toggle('active', b.dataset.tf === tf));
+  if (!rsiChart) return;
+  fetch(`${currentTicker.toLowerCase()}_${tf}.json`)
+    .then(r => r.json())
+    .then(data => {
+      rsiSeries.setData(calculateRSI(data, 14));
+      if (tf === currentTF) {
+        const mainRange = chart.timeScale().getVisibleLogicalRange();
+        if (mainRange) rsiChart.timeScale().setVisibleLogicalRange(mainRange);
+      } else {
+        rsiChart.timeScale().fitContent();
+      }
+    })
+    .catch(() => setStatus(`Could not load ${currentTicker.toLowerCase()}_${tf}.json for RSI.`, true));
+}
+
+document.querySelectorAll('.rsi-tf-btn').forEach(btn => {
+  btn.addEventListener('click', () => loadRsiData(btn.dataset.tf));
+});
 
 // The main chart's half of the sync is set up ONCE (it survives RSI
 // being destroyed/recreated) - guarded so it does nothing if rsiChart
-// doesn't currently exist (RSI is switched off).
+// doesn't currently exist (RSI is switched off), or if RSI is showing
+// a different timeframe than the main chart.
 chart.timeScale().subscribeVisibleLogicalRangeChange(range => {
-  if (!range || syncingFromRsi || !rsiChart) return;
+  if (!range || syncingFromRsi || !rsiChart || rsiTF !== currentTF) return;
   syncingFromMain = true;
   rsiChart.timeScale().setVisibleLogicalRange(range);
   syncingFromMain = false;
@@ -853,6 +911,7 @@ function switchTicker(ticker) {
   }
   loadTimeframe(currentTF);
   loadDailySnapshot(ticker);
+  if (rsiChart) loadRsiData(currentTF);
 }
 
 function renderWatchlist() {

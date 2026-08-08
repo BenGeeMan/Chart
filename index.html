@@ -29,12 +29,12 @@
   }
   #app {
     display: grid;
-    grid-template-rows: 44px 1fr;
-    grid-template-columns: 200px 1fr 380px;
+    grid-template-rows: 44px auto 1fr;
+    grid-template-columns: 200px 1fr;
     height: 100vh;
   }
   header {
-    grid-column: 1 / 4;
+    grid-column: 1 / 3;
     display: flex;
     align-items: center;
     gap: 16px;
@@ -42,6 +42,16 @@
     background: var(--bg);
     border-bottom: 1px solid var(--panel-border);
   }
+  #status {
+    grid-column: 1 / 3;
+    font-size: 11px;
+    color: var(--text-dim);
+    padding: 4px 16px;
+    min-height: 12px;
+    border-bottom: 1px solid var(--panel-border);
+  }
+  #status.error { color: var(--down); }
+  #status.ok { color: var(--up); }
   .symbol {
     font-weight: 700;
     font-size: 14px;
@@ -512,12 +522,16 @@
       <button class="tf-btn" data-tf="quarterly">Q</button>
     </div>
     <div class="header-icon-buttons">
+      <button id="clear-btn" class="icon-btn" title="Clear all drawings">🗑</button>
+      <button id="copy-text-btn" class="icon-btn" title="Copy chart state text">🗒</button>
+      <button id="save-text-btn" class="icon-btn" title="Save chart state text to file">📄</button>
       <button id="paste-modal-btn" class="icon-btn" title="Paste from Claude">📥</button>
       <button id="copy-image-btn" class="icon-btn" title="Copy image">📋</button>
       <button id="save-image-btn" class="icon-btn" title="Save image">⬇</button>
       <button id="copy-image-claude-btn" class="icon-btn accent" title="Copy image for Claude">✦</button>
     </div>
   </header>
+  <div id="status"></div>
 
   <div id="paste-modal-overlay">
     <div id="paste-modal">
@@ -592,7 +606,7 @@
       </div>
       <div id="earnings-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">29</div>
+      <div id="build-number">30</div>
       <div id="main-no-data">No Data</div>
     </div>
     <div id="rsi-chart-container">
@@ -611,31 +625,8 @@
     </div>
   </div>
 
-  <div id="sidebar">
-    <div class="sidebar-section">
-      <div class="sidebar-title">Paste Claude's Instructions</div>
-      <div class="hint">
-        One command per line. Supported for now:<br>
-        <code>MARKER date=YYYY-MM-DD pos=above|below shape=arrowUp|arrowDown|circle color=green|red|blue text="label"</code><br>
-        <code>LINE price=NUMBER color=green|red|blue label="text"</code>
-      </div>
-      <textarea id="input-box" placeholder="MARKER date=2026-06-15 pos=below shape=arrowUp color=green text=&quot;Bullish crossover&quot;&#10;LINE price=32.50 color=blue label=&quot;Resistance&quot;"></textarea>
-      <div id="status"></div>
-      <div class="actions">
-        <button id="render-btn">Draw on chart</button>
-        <button id="clear-btn" class="secondary">Clear all</button>
-      </div>
-    </div>
-
-    <div class="sidebar-section">
-      <div class="sidebar-title">Chart State (copy to Claude)</div>
-      <div class="hint">Reflects the current ticker, timeframe, every indicator's on/off state, and anything drawn on the chart.</div>
-      <textarea id="output-box" readonly placeholder="Nothing on the chart yet."></textarea>
-      <div class="actions">
-        <button id="copy-btn">Copy to clipboard</button>
-      </div>
-    </div>
-  </div>
+  <textarea id="input-box" style="display:none;"></textarea>
+  <textarea id="output-box" readonly style="display:none;"></textarea>
 </div>
 
 <script>
@@ -1499,12 +1490,11 @@ chart.subscribeCrosshairMove(param => {
   if (index !== -1) updateTurnoverBox(index);
 });
 
-document.getElementById('render-btn').addEventListener('click', renderCommands);
-
-// Quick-paste modal - a temporary popup alternative to the always-open
-// sidebar textarea, reachable from the header. Reuses the exact same
-// renderCommands() parsing/drawing logic by just handing its text over
-// to the existing input box first, rather than duplicating that logic.
+// Quick-paste modal - a temporary popup alternative to the old
+// always-open sidebar textarea, reachable from the header. Reuses the
+// exact same renderCommands() parsing/drawing logic by just handing its
+// text over to the existing (now hidden) input box first, rather than
+// duplicating that logic.
 const pasteModalOverlay = document.getElementById('paste-modal-overlay');
 document.getElementById('paste-modal-btn').addEventListener('click', () => {
   document.getElementById('paste-modal-textarea').value = '';
@@ -1523,10 +1513,18 @@ document.getElementById('paste-modal-draw-btn').addEventListener('click', () => 
   pasteModalOverlay.classList.remove('show');
 });
 document.getElementById('clear-btn').addEventListener('click', clearAll);
-document.getElementById('copy-btn').addEventListener('click', () => {
-  const box = document.getElementById('output-box');
-  box.select();
-  navigator.clipboard.writeText(box.value).then(() => setStatus('Copied to clipboard.', false));
+document.getElementById('copy-text-btn').addEventListener('click', () => {
+  navigator.clipboard.writeText(document.getElementById('output-box').value)
+    .then(() => setStatus('Chart state text copied to clipboard.', false));
+});
+document.getElementById('save-text-btn').addEventListener('click', () => {
+  const blob = new Blob([document.getElementById('output-box').value], { type: 'text/plain' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `${currentTicker}_${currentTF}_chart_state.txt`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+  setStatus('Chart state text saved.', false);
 });
 
 // Captures just the chart canvas(es) - not the watchlist, not the

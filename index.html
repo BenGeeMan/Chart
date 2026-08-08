@@ -155,6 +155,26 @@
     border-top: 2px dashed;
     height: 0;
   }
+  #turnover-box {
+    position: absolute;
+    bottom: 10px;
+    left: 12px;
+    z-index: 5;
+    font-size: 11px;
+    line-height: 1.7;
+    color: var(--text-dim);
+    user-select: none;
+  }
+  #turnover-box .row {
+    display: flex;
+    gap: 6px;
+  }
+  #turnover-box .label { min-width: 46px; }
+  #turnover-box .value {
+    font-family: var(--mono);
+    color: var(--text);
+    font-weight: 600;
+  }
 
   #sidebar {
     background: var(--panel);
@@ -262,12 +282,18 @@
   <div id="chart-pane">
     <div id="legend">
       <div class="headline" id="legend-headline">HPQ · Daily · NYSE</div>
-      <label class="ind-row" data-series="ema_10"><input type="checkbox" checked><span class="swatch" style="background:#2962ff"></span>EMA 10</label>
-      <label class="ind-row" data-series="ema_20"><input type="checkbox" checked><span class="swatch" style="background:#26a69a"></span>EMA 20</label>
-      <label class="ind-row" data-series="ema_50"><input type="checkbox" checked><span class="swatch" style="background:#ef5350"></span>EMA 50</label>
+      <label class="ind-row" data-series="ema_10"><input type="checkbox" checked><span class="swatch" style="background:#000000"></span>EMA 10</label>
+      <label class="ind-row" data-series="ema_20"><input type="checkbox" checked><span class="swatch" style="background:#2962ff"></span>EMA 20</label>
+      <label class="ind-row" data-series="ema_50"><input type="checkbox" checked><span class="swatch" style="background:#26a69a"></span>EMA 50</label>
       <label class="ind-row" data-series="ema_100"><input type="checkbox" checked><span class="swatch dashed" style="border-color:#787b86"></span>EMA 100</label>
+      <label class="ind-row" data-series="ema_200"><input type="checkbox" checked><span class="swatch" style="background:#ef5350"></span>EMA 200</label>
       <div class="ind-row" style="margin-top:4px; cursor:default;">Turnover (bars, red/teal by direction)</div>
       <label class="ind-row" data-series="turnover_ema"><input type="checkbox" checked><span class="swatch dashed" style="border-color:#5b8ff9"></span>Turnover EMA 20</label>
+    </div>
+    <div id="turnover-box">
+      <div class="row"><span class="label">LT</span><span class="value" id="turnover-lt">—</span></div>
+      <div class="row"><span class="label">AT (3)</span><span class="value" id="turnover-at3">—</span></div>
+      <div class="row"><span class="label">AT (20)</span><span class="value" id="turnover-at20">—</span></div>
     </div>
     <div id="chart"></div>
   </div>
@@ -312,27 +338,43 @@ const chart = LightweightCharts.createChart(chartEl, {
     horzLines: { color: '#f0f3fa' },
   },
   crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
-  rightPriceScale: { borderColor: '#e0e3eb' },
+  rightPriceScale: { borderColor: '#e0e3eb', mode: LightweightCharts.PriceScaleMode.Logarithmic },
   timeScale: { borderColor: '#e0e3eb', timeVisible: false },
 });
 
-// Candles: hollow white for up, solid red for down (per explicit request).
+// Candles: hollow white body for up, solid red body for down. Wicks and
+// borders are always black on both, regardless of direction.
 const series = chart.addCandlestickSeries({
   upColor: '#ffffff',
   downColor: '#ef5350',
-  borderUpColor: '#131722',
-  borderDownColor: '#ef5350',
-  wickUpColor: '#131722',
-  wickDownColor: '#ef5350',
+  borderUpColor: '#000000',
+  borderDownColor: '#000000',
+  wickUpColor: '#000000',
+  wickDownColor: '#000000',
 });
 
 // EMA overlays, sharing the main price scale.
 const emaSeries = {
-  ema_10:  chart.addLineSeries({ color: '#2962ff', lineWidth: 1, priceLineVisible: false, lastValueVisible: false }),
-  ema_20:  chart.addLineSeries({ color: '#26a69a', lineWidth: 1, priceLineVisible: false, lastValueVisible: false }),
-  ema_50:  chart.addLineSeries({ color: '#ef5350', lineWidth: 1, priceLineVisible: false, lastValueVisible: false }),
+  ema_10:  chart.addLineSeries({ color: '#000000', lineWidth: 1, priceLineVisible: false, lastValueVisible: false }),
+  ema_20:  chart.addLineSeries({ color: '#2962ff', lineWidth: 1, priceLineVisible: false, lastValueVisible: false }),
+  ema_50:  chart.addLineSeries({ color: '#26a69a', lineWidth: 1, priceLineVisible: false, lastValueVisible: false }),
   ema_100: chart.addLineSeries({ color: '#787b86', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, priceLineVisible: false, lastValueVisible: false }),
+  ema_200: chart.addLineSeries({ color: '#ef5350', lineWidth: 1, priceLineVisible: false, lastValueVisible: false }),
 };
+
+// EMA 200 isn't in the exported data files (only 10/20/50/100 were
+// pre-computed) - calculated here instead, directly from each bar's
+// close price, using the same recursive formula (seed = first value,
+// then price*k + prev*(1-k)) that the Python pipeline used, so the
+// result matches what a server-side calculation would have produced.
+function calculateEMA(bars, period) {
+  const k = 2 / (period + 1);
+  let prev = null;
+  return bars.map(bar => {
+    prev = prev === null ? bar.close : bar.close * k + prev * (1 - k);
+    return { time: bar.time, value: prev };
+  });
+}
 
 // Turnover sub-panel, pinned to the bottom ~25% of the same chart via its
 // own price scale (the standard Lightweight Charts trick for a "volume
@@ -366,8 +408,46 @@ let currentTicker = 'HPQ';
 let currentTF = 'daily';
 let barsData = [];
 let markers = [];
+let crossoverMarkers = [];
 let priceLines = [];
 let watchlistData = [];
+
+function formatTurnover(value) {
+  if (value == null || isNaN(value)) return '—';
+  const abs = Math.abs(value);
+  if (abs >= 1e9) return '$' + (value / 1e9).toFixed(2) + 'B';
+  if (abs >= 1e6) return '$' + (value / 1e6).toFixed(2) + 'M';
+  if (abs >= 1e3) return '$' + (value / 1e3).toFixed(2) + 'K';
+  return '$' + value.toFixed(2);
+}
+
+// A dot wherever the 10 EMA crosses the 20 EMA (either direction) -
+// computed straight from the ema_10/ema_20 values already in the data,
+// same crossover logic used in the original Python pipeline.
+function computeCrossoverMarkers(data) {
+  const out = [];
+  for (let i = 1; i < data.length; i++) {
+    const prev10 = data[i - 1].ema_10, prev20 = data[i - 1].ema_20;
+    const cur10 = data[i].ema_10, cur20 = data[i].ema_20;
+    if (prev10 == null || prev20 == null || cur10 == null || cur20 == null) continue;
+    const crossedUp = prev10 <= prev20 && cur10 > cur20;
+    const crossedDown = prev10 >= prev20 && cur10 < cur20;
+    if (crossedUp || crossedDown) {
+      out.push({ time: data[i].time, position: 'inBar', shape: 'circle', color: '#000000', text: '' });
+    }
+  }
+  return out;
+}
+
+// Combines the automatic crossover dots with the user/Claude-added
+// markers, sorted by time (required by Lightweight Charts), and applies
+// them to the chart. Crossover dots are NOT affected by "Clear all" -
+// they're a chart indicator, not a manual annotation.
+function refreshMarkers() {
+  const manual = markers.map(m => ({ time: m.time, position: m.position, shape: m.shape, color: m.color, text: m.text }));
+  const combined = [...crossoverMarkers, ...manual].sort((a, b) => (a.time > b.time ? 1 : a.time < b.time ? -1 : 0));
+  series.setMarkers(combined);
+}
 
 function loadTimeframe(tf) {
   const cfg = TIMEFRAME_META[tf];
@@ -380,8 +460,10 @@ function loadTimeframe(tf) {
 
       series.setData(data);
       for (const key of Object.keys(emaSeries)) {
+        if (key === 'ema_200') continue; // computed separately below, not in the data file
         emaSeries[key].setData(data.filter(d => d[key] != null).map(d => ({ time: d.time, value: d[key] })));
       }
+      emaSeries.ema_200.setData(calculateEMA(data, 200));
       turnoverSeries.setData(data.map(d => ({
         time: d.time,
         value: d.turnover,
@@ -400,8 +482,13 @@ function loadTimeframe(tf) {
       document.getElementById('legend-headline').innerHTML =
         `${currentTicker} · ${cfg.label} &nbsp; <span class="${changeClass}">${sign}${change.toFixed(2)} (${sign}${pct.toFixed(2)}%)</span>`;
 
+      document.getElementById('turnover-lt').textContent = formatTurnover(last.turnover);
+      document.getElementById('turnover-at3').textContent = formatTurnover(last.turnover_ema_3);
+      document.getElementById('turnover-at20').textContent = formatTurnover(last.turnover_ema_20);
+
       markers = [];
-      series.setMarkers([]);
+      crossoverMarkers = computeCrossoverMarkers(data);
+      refreshMarkers();
       for (const pl of priceLines) series.removePriceLine(pl.lwcHandle);
       priceLines = [];
       updateOutputBox();
@@ -529,7 +616,7 @@ function renderCommands() {
     }
   }
 
-  series.setMarkers(markers.map(m => ({ time: m.time, position: m.position, shape: m.shape, color: m.color, text: m.text })));
+  refreshMarkers();
 
   if (errors.length) {
     setStatus(`Drew ${addedMarkers} marker(s), ${addedLines} line(s). ${errors.length} line(s) had issues: ${errors.join(' | ')}`, true);
@@ -541,7 +628,7 @@ function renderCommands() {
 
 function clearAll() {
   markers = [];
-  series.setMarkers([]);
+  refreshMarkers();
   for (const pl of priceLines) series.removePriceLine(pl.lwcHandle);
   priceLines = [];
   document.getElementById('input-box').value = '';
@@ -576,7 +663,7 @@ chart.subscribeClick(param => {
     text: `$${bar.close.toFixed(2)}`,
     source: 'user',
   });
-  series.setMarkers(markers.map(m => ({ time: m.time, position: m.position, shape: m.shape, color: m.color, text: m.text })));
+  refreshMarkers();
   updateOutputBox();
   setStatus(`Marked ${param.time} on the chart.`, false);
 });

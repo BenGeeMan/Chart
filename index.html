@@ -554,6 +554,7 @@
       <button id="copy-image-btn" class="icon-btn" title="Copy image">📋</button>
       <button id="save-image-btn" class="icon-btn" title="Save image">⬇</button>
       <button id="copy-image-claude-btn" class="icon-btn accent" title="Copy image for Claude">✦</button>
+      <button id="cb-report-btn" class="icon-btn" title="Open CB Report">📊</button>
     </div>
   </header>
   <div id="status"></div>
@@ -639,7 +640,7 @@
       </div>
       <div id="earnings-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">36</div>
+      <div id="build-number">37</div>
       <div id="main-no-data">No Data</div>
     </div>
     <div id="rsi-chart-container">
@@ -1726,6 +1727,14 @@ document.getElementById('save-text-btn').addEventListener('click', () => {
   a.click();
   URL.revokeObjectURL(a.href);
   setStatus('Chart state text saved.', false);
+});
+
+// The CB Report lives in the sibling RichRoadStockScreenerUS repo, kept
+// updated daily by that project's own workflow - GitHub renders a
+// built-in spreadsheet preview for .xlsx files, so opening its page
+// directly is simpler and more reliable than trying to embed/fetch it.
+document.getElementById('cb-report-btn').addEventListener('click', () => {
+  window.open('https://github.com/BenGeeMan/RichRoadStockScreenerUS/blob/main/CB_Report.xlsx', '_blank');
 });
 
 // Captures just the chart canvas(es) - not the watchlist, not the

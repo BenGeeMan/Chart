@@ -17,19 +17,57 @@ complete-beginner level, including basic GitHub steps.
 `RichRoadStockScreenerUS`, runs the actual daily stock-scanning
 pipeline and owns `PROJECT_HANDOFF.md` for its own details. This repo
 (`chart`) is the visual/communication layer built on top of that data.
-Read both documents when working across the two - decisions in one
-sometimes explain behavior in the other.
+Read both documents when working across the two.
 
-**If the user shares a zip of this repo (via the "Chart Export" GitHub
-Action) or an individual file, cross-reference it against this document
-first** — the protocol format, known limitations, and design decisions
-below explain things that would otherwise look like anomalies.
+**If the user shares a screenshot or a zip of this repo (via the
+"Chart Export" GitHub Action), cross-reference it against this
+document first** — the protocol format, known limitations, and design
+decisions below explain things that would otherwise look like
+anomalies.
 
 **If a change made during a conversation would make this document
-inaccurate or out of date, flag that to the user at the time** — a
-brief note is enough. Don't rewrite it automatically; the user prefers
-to batch documentation updates and will ask for the refreshed file when
-ready.
+inaccurate, flag that to the user at the time** — a brief note is
+enough. Don't rewrite it automatically; the user prefers to batch
+documentation updates and will ask for the refreshed file when ready.
+
+---
+
+## 0. NEXT SESSION PRIORITIES (read this first)
+
+The user was tired and asked to stop here, with this explicit plan for
+next time, in this order:
+
+1. **Finish the remaining annotation tools.** Trend Line, Horizontal
+   Line, Ray, and Horizontal Ray were built in this session (build 36)
+   but **the user reports they "aren't working as imagined"** - no
+   further detail was given before stopping. Debugging this is the
+   very first thing to do next session; don't assume the existing
+   implementation is sound. Still to build after that's fixed:
+   Rectangle, Arrow, Text, Price Range, Date Range, Date and Price
+   Range, Path tool, Highlighter. See Section 6 for the full confirmed
+   TradingView tool-name list this was based on.
+2. **Write an "annotation guide" prompt** - a clean, well-written
+   reference covering the full text protocol (`MARKER`/`LINE`/
+   `TRENDLINE`/`RAY`/`HRAY` plus whatever gets added in step 1), aimed
+   at teaching good annotation practice, not just listing syntax.
+3. **Bake that guide directly into the "Copy image for Claude"
+   capture** (see Section 5) - so a future Claude session with no
+   memory of this one can read the protocol straight out of the image
+   itself. This is explicitly for easing future-session onboarding.
+4. **Connect the chart to a real database** instead of the current
+   static, manually-exported snapshot - the long-deferred item
+   described in Section 4.
+5. **Redo the scan/pipeline** (in the sibling `RichRoadStockScreenerUS`
+   repo) so it produces everything this chart project currently
+   calculates client-side - EMA 200, RSI(14), Volume EMA 3/20, and
+   ideally the multi-timeframe/relative EMA overlays too. See Section 4
+   for the full current client-side-vs-pipeline breakdown.
+6. **Expand/improve the watchlist** - likely connecting it to the full
+   daily scan output rather than the fixed 11 hand-picked stocks.
+7. **Only after 1-6 are solid**, move on to the actual end goal of this
+   whole project: teaching Claude the user's trading-decision logic
+   through this visual tool, so it can eventually become real
+   automated logic. This has not been started.
 
 ---
 
@@ -41,21 +79,21 @@ assistant (Claude), since Claude has no native ability to see or
 interact with a live web app:
 
 1. Claude writes instructions in a simple text format (e.g. "put a
-   marker here," "draw a line there").
-2. The user pastes that text into a box on the chart. The app parses it
-   and draws it visually — the user never draws anything by hand from
-   Claude's instructions.
-3. The chart also has a "Chart State" box that always reflects whatever
-   is currently drawn, which the user copies and pastes back to Claude
-   so both sides are looking at the same thing in a format Claude can
-   read. (Note: this used to also capture the user clicking directly on
-   candles - that click-to-mark feature was explicitly removed at the
-   user's request; see Section 6.)
+   marker here," "draw a trend line there").
+2. The user pastes that text into a box on the chart (via the header's
+   📥 button, which opens a temporary paste modal). The app parses it
+   and draws it visually.
+3. The chart's Chart State (accessed via the header's 🗒/📄 buttons, or
+   baked into the ✦ "Copy image for Claude" screenshot) always
+   reflects the current ticker, timeframe, every indicator's on/off
+   state, and everything drawn — including things the *user* draws
+   directly on the chart via the drawing toolbar (Section 6) — so both
+   sides stay in sync in a format Claude can read.
 
-The eventual goal (not yet started): the user will explain trading
-concepts in plain English, Claude will show its understanding visually
-through this tool, and once they agree the understanding is correct,
-that logic gets turned into permanent code.
+The eventual goal (see Section 0, item 7): the user explains trading
+concepts/decision logic in plain English, Claude shows its
+understanding visually through this tool, and once agreed correct,
+that logic gets turned into permanent, automatable code.
 
 ---
 
@@ -63,263 +101,243 @@ that logic gets turned into permanent code.
 
 | File | Purpose |
 |---|---|
-| `index.html` | The entire app - a single self-contained HTML file (no build tools, no server). Must keep this exact filename; GitHub Pages requires it. |
-| `chart_watchlist.json` | Quote summary (ticker, company name, sector, last price, % change) for every stock in the watchlist panel. |
-| `chart_earnings.json` | Earnings dates (past ~3 years + upcoming) per watchlist stock, keyed by ticker. |
-| `{ticker}_{timeframe}.json` | Price + indicator data per stock per timeframe (e.g. `hpq_daily.json`, `cohr_weekly.json`). One set of 7 files per watchlist stock (77 files total for 11 stocks). |
-| `.github/workflows/chart_export.yml` | Manual-trigger workflow that zips the entire repo into one downloadable file, for handing the project to an AI assistant. |
+| `index.html` | The entire app - a single self-contained HTML file. Must keep this exact filename; GitHub Pages requires it. Contains a visible build-number watermark (currently 36), manually incremented on every handoff, purely so the user can confirm a hard refresh actually picked up new code after repeated caching confusion during development. |
+| `chart_watchlist.json` | Quote summary for the 11 watchlist stocks. |
+| `chart_earnings.json` | Earnings dates (past ~3 years + upcoming) per watchlist stock. |
+| `{ticker}_{timeframe}.json` | Price + indicator data per stock per timeframe (77 files: 11 stocks × 7 timeframes). |
+| `.github/workflows/chart_export.yml` | Manual-trigger workflow that zips the repo for handoff to an AI assistant. |
 
-**Naming convention for this repo specifically:** bias toward naming
-new things with "chart" (e.g. `chart_watchlist.json`,
-`chart_export.yml`). Exception: `index.html` must keep its exact name
-for GitHub Pages to serve it.
+**Naming convention:** bias toward "chart" in new filenames. Exception:
+`index.html`.
 
-**Hosting:** GitHub Pages, deployed from the `main` branch root. The
-repo is currently **public** — a deliberate cost-saving choice (GitHub
-Pages requires a paid Pro plan for a private repo, $4/month) since
-nothing in this repo is sensitive.
-
-**A visible build-number watermark** (large, faint, centered on the
-main chart) exists purely so the user can confirm a hard refresh
-actually picked up new code, after repeated browser-caching confusion
-during development. It gets manually incremented by one on every
-`index.html` handoff. If picking this project back up after a gap,
-just keep incrementing from whatever number is currently in the file.
+**Hosting:** GitHub Pages, public repo (free-tier limitation — Pages
+needs a paid plan for private repos).
 
 ---
 
-## 3. The text protocol
-
-Two commands supported so far, one per line:
+## 3. The text protocol (as of build 36)
 
 ```
 MARKER date=YYYY-MM-DD pos=above|below shape=arrowUp|arrowDown|circle color=green|red|blue text="label"
 LINE price=NUMBER color=green|red|blue label="text"
+TRENDLINE time1=YYYY-MM-DD price1=NUMBER time2=YYYY-MM-DD price2=NUMBER color=green|red|blue
+RAY time1=YYYY-MM-DD price1=NUMBER time2=YYYY-MM-DD price2=NUMBER color=green|red|blue
+HRAY time=YYYY-MM-DD price=NUMBER color=green|red|blue
 ```
 
 - Parsed with a simple `key=value` attribute parser; quoted values
-  (`text="..."`) support spaces.
-- Unknown commands or missing required attributes are reported back in
-  the status line rather than silently failing.
-- **This protocol is intentionally minimal and expected to grow** as
-  new concepts get explained and need new visual vocabulary (zones,
-  trend lines, shaded regions, etc. are natural next additions).
+  support spaces.
+- **Bidirectional and consistent by design:** every command Claude can
+  send, the user can also produce by drawing directly on the chart
+  (via the toolbar, Section 6) or pasting the same syntax back - both
+  paths call the same underlying `addUserDrawing()`/rendering
+  functions, so there's no divergent behavior between "Claude drew
+  this" and "the user drew this." Items added by the user directly are
+  tagged `[added by user on chart]` in the Chart State output.
+- `TRENDLINE`/`RAY`/`HRAY` were added in build 36 (see Section 6 for
+  how Ray/Horizontal Ray extension actually works - important nuance).
+- **Still needs the tools from Section 0, item 1** before the protocol
+  can grow to cover Rectangle/Arrow/Text/measurement tools.
 
 ---
 
-## 4. Visual design
+## 4. Data — what's pre-computed vs. calculated client-side
 
-Mimics the user's **actual personal TradingView setup** (confirmed via
-a screenshot), not a generic "TradingView-style" guess. Layout, top to
-bottom:
+Unchanged from the last full audit: the original data export included
+`ema_10/20/50/100`, `turnover`, `turnover_ema_3/20` per bar. Everything
+else is calculated live in the browser:
 
-- **Watchlist** (left column) - all 11 stocks, click to switch ticker.
-- **Header** - ticker/company name, then timeframe buttons
-  (5m/15m/1H/D/W/M/Q) positioned immediately after it on the left side
-  (not right-aligned).
-- **Main price chart** - candlesticks, semi-log price scale. Hollow
-  white body for up bars, solid red for down; **wicks and borders are
-  always black regardless of direction** (explicit request).
-- **Volume panel** (bottom ~25% of the same canvas, via Lightweight
-  Charts' scaleMargins trick) - raw share volume bars (not dollar
-  turnover - see Section 5), colored red/teal by direction, with a
-  Volume EMA 20 dashed overlay line.
-- **RSI panel** - a genuinely **separate chart instance** below the
-  main one, not sharing its canvas. This matters architecturally - see
-  the callout in Section 6.
+- **EMA 200** - not in the original export.
+- **Volume EMA 3 / Volume EMA 20** - export only had *turnover* EMAs,
+  not raw *volume* EMAs (the panel changed from dollar-turnover to
+  share-volume after export).
+- **RSI(14)** - never in the export.
+- **Every Timeframe EMA / Relative EMA overlay** - each re-fetches that
+  timeframe's raw file and computes EMA(10) fresh every time it's
+  toggled on.
 
-### Indicator legend
-Collapsible ("Indicators ▾" button, top-left) rather than always
-expanded. When open, a card-style panel shows **five columns**, each
-with its own master checkbox (turning a column off remembers each
-row's individual state and restores exactly that, not "all on", when
-turned back on):
+**This is explicitly item 4-5 in Section 0's next-session plan** -
+moving this into `fetch_stock_timeframes.py` in the sibling repo is
+the stated direction, not yet started.
 
-1. **Price EMAs** - EMA 10 (black), 20 (blue), 50 (green), 200 (red),
-   and the 10/20 EMA crossover marker (orange dot, sits precisely on
-   the EMA 10 line's value via a dedicated invisible tracking series -
-   independent visibility from the EMA 10/20 lines themselves).
-2. **Timeframe EMAs (10)** - seven checkboxes (5m/15m/1H/Daily/
-   Weekly/Monthly/Quarterly), each independently toggleable, each
-   overlaying that timeframe's own EMA(10) onto whatever chart is
-   currently showing - e.g. show the Weekly EMA 10 on top of Daily
-   candles. See Section 5 for how time-format conversion works here.
-3. **Relative EMAs (10)** - "1 TF above" / "2 TFs above". Same idea,
-   but the target timeframe is recalculated relative to whatever the
-   main chart currently shows (viewing Daily, "1 above" = Weekly;
-   switch to Weekly, "1 above" becomes Monthly automatically).
-4. **Volume & Earnings** - Earnings badges, Volume bars, Volume EMA 20.
-5. **RSI** - just the one RSI(14) checkbox today, but deliberately its
-   own column since the user expects to add more RSI-related
-   indicators later.
+**Multi-timeframe time-format handling:** daily-and-above stores `time`
+as a date string; intraday stores Unix timestamps. Overlaying one
+timeframe's data onto a chart of a different timeframe needs
+conversion - see `alignTimeToCurrentChart()` and `timeToNumeric()` /
+`extrapolatePrice()` in `index.html` (the latter two are also what the
+Ray drawing tool uses to extend a line while preserving its slope).
 
-### Earnings badges
-Small orange triangles/pentagon-with-"E" badges are **plain HTML
-elements positioned on top of the chart**, not Lightweight Charts'
-native marker system. Their X position comes from the chart's own
-`timeToCoordinate()`, but Y is an ordinary fixed CSS `bottom` value -
-see the debugging story in Section 6 for why this ended up being the
-right approach. Only shown on daily-and-above timeframes (a single
-earnings date doesn't map cleanly onto intraday bars).
-
-### Info boxes
-- **Bottom-left, white box:** `LT` / `AT (3)` / `AT (20)` - updates
-  live to whatever bar the crosshair is hovering, defaults to the
-  latest bar when the cursor isn't on the chart.
-- **Top-right, "Current daily":** always shows the latest *daily* bar's
-  figures regardless of which timeframe is currently selected -
-  independent fetch, not tied to the main chart's own data.
-- Both are figures for **volume**, not dollar turnover (renamed - see
-  Section 5). Both boxes' positions are calculated in JS relative to
-  chart boundaries (price-axis width, panel edges) rather than fixed
-  pixel guesses, so they stay correctly placed across different
-  tickers/timeframes.
-
-### "No Data" messaging
-A faint, centered "No Data" watermark (matching the build-number
-style) appears on the main chart or RSI panel whenever a data file
-fails to load, or loads successfully but is empty - so a genuinely
-missing file is never silently indistinguishable from a rendering bug.
-
-### Known simplifications vs. the user's real setup (not yet resolved)
-- The real setup shows an indicator called **"RichRoad MA v3"** and
-  what looks like a 5th, thicker moving-average line. Its actual
-  formula is still unknown - a strong candidate for the first "explain
-  a concept to Claude" session once that workflow starts.
+**Current watchlist (11 stocks):**
+`HPQ, COHR, ABNB, RKLB, IREN, NTRA, NEM, TTWO, KGS, CVSA, RMAX` — one
+per sector, chosen for turnover/variety. Section 0 item 6 plans to
+expand this.
 
 ---
 
-## 5. Data
+## 5. Visual design (current state, build 36)
 
-- **Library:** TradingView's own open-source "Lightweight Charts"
-  (loaded via CDN), chosen specifically so the chart's visual behavior
-  matches TradingView's real product.
-- **Source:** every number in every `{ticker}_{timeframe}.json` file
-  came from the actual `RichRoadStockTimeframes.db` database built in
-  the sibling `RichRoadStockScreenerUS` project - real OHLCV data, not
-  invented.
-- **How it got into this repo: manually, as a one-time export**, not
-  automatically. A Python script queried the database and wrote out
-  the JSON files, which were then hand-uploaded. **This is still a
-  frozen snapshot from one specific day** - no automated pipeline keeps
-  it updated. Explicitly deferred by the user more than once; nothing
-  decided yet on whether/how to automate it.
+**Layout:** Watchlist (left) | main area | — no right sidebar anymore
+(removed this session; see Section 7). Header row: ticker/name,
+timeframe buttons (5m/15m/1H/D/W/M/Q, left-aligned), then far-right:
+seven icon buttons — 🗑 Clear all, 🗒 Copy chart state text, 📄 Save
+chart state text to file, 📥 Paste from Claude (opens a temporary
+modal), 📋 Copy image, ⬇ Save image, ✦ Copy image for Claude (bakes the
+full Chart State text into the image itself, so one paste gives Claude
+both the picture and the context in a single action). A thin status
+bar sits directly below the header.
 
-### What's pre-computed in the data files vs. calculated live in the browser
-The original export included `ema_10/20/50/100`, `turnover`,
-`turnover_ema_3/20` per bar (all computed server-side by the sibling
-project's pipeline). Everything added **since** that original export
-is calculated **client-side, in JavaScript, on the fly**, because the
-data files themselves were never regenerated to include it:
+**Main chart:** candlesticks, semi-log price scale, wicks/borders
+always black. **Header stats line** (ticker · timeframe · change/%/
+range/volume) is now **hover-reactive** - it updates to whichever bar
+the crosshair is over (defaulting to the latest bar), computing change
+and % vs. that bar's own previous close (not the visible range's
+start), and a "Range" figure that includes any gap from the prior
+close. All text in this line is plain black (color-coding was removed
+per user request); the word "Range" itself was also removed, leaving
+just a signed number in that slot.
 
-- **EMA 200** - not in the original export (only 10/20/50/100 were).
-- **Volume EMA 3 / Volume EMA 20** - the export only had *turnover*
-  EMAs, not raw *volume* EMAs, after the panel was changed from
-  dollar-turnover to share-volume.
-- **RSI(14)** - never in the export at all.
-- **Every Timeframe EMA / Relative EMA overlay** - each one re-fetches
-  that timeframe's raw OHLCV file and computes EMA(10) from scratch in
-  the browser, every time it's toggled on.
+**Volume panel:** bottom ~25% via scaleMargins trick, raw share volume
+(red/teal), Volume EMA 20 dashed line, "Volume" alone omitted from the
+Chart State text (visually obvious from the image) but Volume EMA 20
+still listed.
 
-**The user has explicitly stated the long-term direction: all of this
-should eventually move into the actual data pipeline** (most likely
-`fetch_stock_timeframes.py` in the sibling repo, alongside where
-`ema_10/20/50/100` and the turnover EMAs already get computed
-server-side) rather than being recalculated in-browser every time. This
-hasn't been started - flagging it here is the first step. When it
-happens, the client-side `calculateEMA()` / `calculateRSI()` JS
-functions in `index.html` become unnecessary for anything the pipeline
-now provides directly in the JSON files, and can be simplified or
-removed accordingly.
+**RSI panel:** separate chart instance (architecture reasons in
+Section 7), with its **own independent timeframe selector**
+(5m/15m/1H/D/W/M/Q) - defaults to matching the main chart but can be
+set differently; pan/zoom sync between the two charts only happens
+when both show the same timeframe.
 
-### Multi-timeframe time-format handling
-Daily-and-above timeframes store `time` as a date string
-(`"2026-08-07"`); intraday timeframes store it as a Unix timestamp.
-Overlaying one timeframe's EMA onto a chart of a *different* timeframe
-required a conversion step (`alignTimeToCurrentChart()` in
-`index.html`): date strings convert to midnight-UTC timestamps when
-overlaying onto an intraday chart; timestamps collapse to one date
-string per calendar day (keeping the last value) when overlaying onto
-a daily-or-higher chart.
+**Drawing toolbar** (new, build 36): vertical, left edge of the chart,
+5 buttons - Cursor, Trend Line, Horizontal Line, Ray, Horizontal Ray.
+**User reports this isn't working as expected** - see Section 0.
 
-### Current watchlist (11 stocks, one per sector, chosen for turnover/variety)
-`HPQ, COHR, ABNB, RKLB, IREN, NTRA, NEM, TTWO, KGS, CVSA, RMAX`
+**Indicator legend:** collapsible ("Indicators ▾"), closes on
+outside-click. Six columns, each with its own master checkbox
+(remembers individual row states when toggled off/on):
+1. **Standard EMAs** - EMA 10/20/50/200.
+2. **M10s** - 7 fixed-timeframe EMA(10) overlays.
+3. **Relative M10s** - Current TF / 1 TF above / 2 TFs above (offset
+   relative to whatever the main chart currently shows).
+4. **Volume** - Volume bars, Volume EMA 20.
+5. **Events** - Earnings, 10/20 EMA cross (both moved here from other
+   columns per user request).
+6. **Indicators** - currently just RSI(14), deliberately its own
+   column since more RSI-related indicators are expected later.
 
-Each has all 7 timeframes exported: `daily` (last 500 bars), `weekly`,
-`monthly`, `quarterly` (full history for these three), `hourly` (last
-600 bars), `m15`, `m5` (last 600 bars each).
+**Standing instruction from the user:** whenever a new indicator is
+added, (a) add its swatch color to the `COLOR_NAMES` lookup (used to
+name colors in the Chart State text), and (b) explicitly ask the user
+whether it should be included in that text output - never assume
+either way.
+
+**Earnings badges:** small rounded-square orange badges (changed from
+an earlier pentagon shape - see Section 7), plain HTML overlays
+positioned via the chart's `timeToCoordinate()` for X and a fixed CSS
+value for Y. Daily-and-above timeframes only.
+
+**Screenshot capture:** uses `html2canvas` (not the charting library's
+own limited screenshot function) so HTML overlays - earnings badges,
+info boxes - are correctly included. Scoped to just the chart area,
+never the watchlist or header. The "for Claude" variant additionally
+renders the full Chart State text as real, readable text appended
+below the image.
 
 ---
 
-## 6. Architecture notes worth knowing (hard-won, don't repeat these)
+## 6. Confirmed TradingView tool identification
+
+The user went through their actual TradingView toolbar with Claude and
+confirmed (via repeated correction) the following tool names, which is
+what Section 0 item 1's remaining build list is based on:
+
+| Tool | Status |
+|---|---|
+| Horizontal Ray | **Built, build 36** |
+| Trend Line | **Built, build 36** |
+| Ray | **Built, build 36** |
+| Rectangle | Not built |
+| Price Range | Not built |
+| Text | Not built |
+| Arrow Marker | Not built |
+| Date and Price Range | Not built |
+| Path tool | Not built |
+| Date Range | Not built |
+| Horizontal Line | **Built, build 36** |
+| Arrow | Not built (distinct from Arrow Marker above - both confirmed as separate tools) |
+| Highlighter | Not built |
+| Eraser | Not built |
+
+**Important nuance on how "Ray" and "Horizontal Ray" actually render:**
+neither is truly infinite - both extend only as far as the currently
+*loaded* data (500 bars for daily, full history for weekly/monthly/
+quarterly, etc.), computed once at draw time via
+`extrapolatePrice()`/`timeToNumeric()` in `index.html`. This is a
+deliberate, pragmatic tradeoff (avoiding the complexity of dynamically
+re-extending lines on every pan/zoom event) and is very likely related
+to why the user found these "not working as imagined" - worth
+reconsidering this approach next session rather than assuming it's
+just a bug to patch.
+
+---
+
+## 7. Architecture notes worth knowing (hard-won, don't repeat these)
 
 **RSI needed a genuinely separate chart instance, not a shared-canvas
-trick.** The original approach tried to give RSI its own "panel" via
-Lightweight Charts' `scaleMargins` (the same trick used for the volume
-panel, which shares the main chart's single canvas). This does NOT
-work for a third stacked panel: a price scale's axis *labels* are
-drawn across the chart's **entire canvas height regardless of
-scaleMargins** - margins only affect where *data* gets plotted, not
-where axis labels render. The symptom was price-axis numbers (e.g.
-`8.05`) appearing to repeat all the way down through where RSI should
-have been. The fix was giving RSI its own actual `LightweightCharts.
-createChart()` instance in a separate DOM element below the main
-chart, with the two chart instances' time scales synced via
-`subscribeVisibleLogicalRangeChange` (only when both show the same
-timeframe - see below).
+trick.** A single canvas's price-axis labels render across its FULL
+height regardless of `scaleMargins` - margins only affect where data
+plots, not where axis labels draw. Symptom was price numbers appearing
+to repeat all the way through where RSI should have been. Fixed with
+a real second `LightweightCharts.createChart()` instance, synced via
+`subscribeVisibleLogicalRangeChange` (only when both charts show the
+same timeframe).
 
-**RSI's toggle-off/toggle-on bug was a missing `min-height: 0` on a
-CSS Grid item, not a JavaScript problem at all.** After extensive
-diagnostic logging confirmed the RSI chart object, its canvas, and its
-data were all being created correctly with correct dimensions, the
-real cause turned out to be that `#chart-pane` (a grid item inside a
-`100vh`-constrained layout) was missing `min-height: 0`. Without it, a
-grid item's own content can force it to grow taller than its assigned
-row rather than compressing to fit - pushing the RSI panel down past
-the visible viewport, with `overflow: hidden` on `<body>` meaning there
-was never any way to scroll to it. **All three grid columns
-(`#chart-pane`, `#watchlist`, `#sidebar`) need both `min-height: 0` and
-`min-width: 0`** - the same class of bug recurred horizontally (the
-right sidebar disappearing entirely) when the browser window moved to
-a different monitor with different available width. If a similarly
-"impossible" layout bug shows up again, check this class of issue
-early rather than assuming it's a data/timing/JS problem.
+**A missing `min-height: 0` / `min-width: 0` on CSS Grid items caused
+two separate "impossible" bugs** - RSI refusing to reopen after being
+toggled off (vertical), and the entire right sidebar disappearing on a
+different monitor (horizontal, before the sidebar was removed
+entirely). Without these properties, a grid item's own content can
+force it larger than its assigned space rather than compressing to
+fit, and `overflow: hidden` on `<body>` meant there was no way to
+scroll to the overflow. All three grid columns needed both properties.
+**If a similarly "impossible" layout bug appears again, check this
+class of issue early.**
 
-**When RSI shows a different timeframe than the main chart, pan/zoom
-syncing between them is deliberately disabled** (`rsiTF !== currentTF`
-guards on both sync subscriptions) - keeping bar-index-based ranges
-locked together only makes sense when both charts are on the same
-resolution.
+**When debugging "creates successfully but doesn't render," build a
+real headless-JS simulation rather than guessing repeatedly.** The
+`barsData` temporal-dead-zone crash that broke the entire page (not
+just RSI) was found this way - a hand-rolled Node `vm` context
+mimicking `document`/`window` caught the exact ReferenceError that
+several rounds of speculative fixes had missed. Reusable technique for
+any "this should work but doesn't" situation in future sessions.
 
-**Earnings badges are plain HTML, not Lightweight Charts markers.**
-Several rounds of trying to use the library's native marker/price-line
-system for a "fixed height, always the same distance from the volume
-panel's bottom" badge produced inconsistent, hard-to-predict results.
-Switching to ordinary positioned `<div>` elements (X from
-`timeToCoordinate()`, Y from a plain CSS value) gave direct, reliable
-control. If a similar "needs to be pinned to an exact, predictable
-pixel position regardless of data" requirement comes up again, prefer
-this HTML-overlay approach over fighting the charting library's own
-positioning system.
+**Earnings badges are plain HTML, not Lightweight Charts markers, and
+use a rounded square, not a pentagon.** The pentagon shape (CSS
+`clip-path`) looked right on screen but `html2canvas` doesn't support
+`clip-path`, so captured screenshots showed a plain square instead -
+inconsistent with the live page. Simplified the on-screen badge to
+match what the capture can actually reproduce, rather than the other
+way around, so both are consistent everywhere.
 
-**Column master checkboxes remember individual state.** Turning a
-whole indicator column off saves each row's checked state first, then
-restores exactly that (not "everything on") when switched back on.
+**Column master checkboxes remember individual state** on toggle
+off/on, rather than resetting to "everything on."
+
+**The right sidebar was removed entirely this session** (replaced by
+header icon buttons + a temporary paste modal + a status bar). Every
+function that depended on the old sidebar elements was individually
+re-wired to its new home - `input-box` and `output-box` still exist in
+the DOM as hidden elements (not deleted) since other code still
+reads/writes them programmatically.
 
 ---
 
-## 7. Known limitations / things intentionally left for later
+## 8. Known limitations / deferred items
 
-- **Data is a static, manually-exported snapshot**, and every indicator
-  added since that export is calculated client-side rather than in the
-  pipeline - see Section 5. Moving this into the pipeline is the
-  explicitly stated next architectural step, not yet started.
-- **Only 11 of the ~155 stocks from a typical scan day are in the
-  watchlist** - a deliberate starting scope, not a limit of the design.
-- **"RichRoad MA v3" is not yet replicated** - see Section 4.
-- **No zones, trend lines, or shaded regions yet** in the text
-  protocol - only `MARKER` and `LINE` exist so far.
-- **Click-to-mark was removed** (see Section 1) - there is currently no
-  way for the user's direct chart interaction to get captured as text;
-  only Claude-authored `MARKER`/`LINE` commands populate the Chart
-  State box now.
+See Section 0 for the actively-planned next steps. Additionally:
+
+- **"RichRoad MA v3"** (an indicator visible in the user's real
+  TradingView setup) is still not replicated - formula unknown, a
+  strong candidate for the eventual concept-teaching phase (Section 0,
+  item 7).
+- **Rays are not truly infinite** - see Section 6's nuance box.
+- **Only 11 of ~155 typical scan-day stocks are in the watchlist** -
+  Section 0 item 6.

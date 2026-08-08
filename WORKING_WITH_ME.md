@@ -71,6 +71,17 @@ project-specific handoff document exists for that project.
   sure it stays internally consistent (section numbering,
   cross-references, etc.) - check your own work here before handing it
   back.
+- When ending a session, proactively do a thorough pass on whatever
+  challenges/bugs came up and how they got solved - actually re-check
+  the document against what really happened, not just a surface-level
+  summary of what changed. If I ask whether something specific was
+  included, verify by looking rather than assuming and answering yes.
+- When ending a session, update all relevant documents together, not
+  just the most obvious one - if a project has more than one handoff
+  document (e.g. cross-referenced sibling projects), or if something
+  from the session is also a durable general preference belonging in
+  this document, catch all of them in the same pass rather than
+  leaving one stale while another gets updated.
 
 ## Working style in general
 

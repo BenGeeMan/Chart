@@ -495,6 +495,39 @@
     white-space: nowrap;
   }
   .drawing-toolbar-float button:hover { background: rgba(0,0,0,0.06); }
+  .drawing-handle-move {
+    border-radius: 3px;
+    background: var(--accent);
+    border-color: #ffffff;
+    cursor: move;
+  }
+  .drawing-settings-panel {
+    position: absolute;
+    background: #ffffff;
+    border: 1px solid var(--panel-border);
+    border-radius: 6px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+    padding: 10px;
+    font-size: 11px;
+    color: var(--text);
+    pointer-events: auto;
+    width: 170px;
+    transform: translate(-50%, 0);
+  }
+  .drawing-settings-panel .row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+  .drawing-settings-panel .row:last-child { margin-bottom: 0; }
+  .drawing-settings-panel label { flex: 0 0 auto; color: var(--text-dim); }
+  .drawing-settings-panel input[type=color] {
+    width: 36px; height: 22px; border: none; padding: 0; background: none; cursor: pointer;
+  }
+  .drawing-settings-panel input[type=range] { flex: 1; }
+  .drawing-settings-panel select { flex: 1; font-size: 11px; }
 
   #sidebar {
     background: var(--panel);
@@ -688,7 +721,7 @@
       <div id="earnings-overlay"></div>
       <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">40</div>
+      <div id="build-number">41</div>
       <div id="main-no-data">No Data</div>
     </div>
     <div id="rsi-chart-container">
@@ -1486,6 +1519,27 @@ function extrapolatePrice(time1, price1, time2, price2, targetTime) {
   return price1 + slope * (tt - t1);
 }
 
+// --- Style helpers shared by the settings panel (color/transparency/
+// thickness/line-type) added below. ---
+function colorWithOpacity(hex, opacity) {
+  const m = /^#([0-9a-f]{6})$/i.exec(hex || '');
+  if (!m) return hex;
+  const r = parseInt(m[1].slice(0, 2), 16), g = parseInt(m[1].slice(2, 4), 16), b = parseInt(m[1].slice(4, 6), 16);
+  return `rgba(${r},${g},${b},${opacity == null ? 1 : opacity})`;
+}
+
+function hexToRgbString(hex) {
+  const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex || '');
+  if (!m) return hex;
+  return `rgb(${parseInt(m[1], 16)}, ${parseInt(m[2], 16)}, ${parseInt(m[3], 16)})`;
+}
+
+const LINE_STYLE_MAP = {
+  solid: LightweightCharts.LineStyle.Solid,
+  dashed: LightweightCharts.LineStyle.Dashed,
+  dotted: LightweightCharts.LineStyle.Dotted,
+};
+
 // Returns the two rendered {time, value} endpoints for a shape - for
 // Ray/Horizontal Ray this includes the same edge-extrapolation used at
 // render time, so selection handles and hit-testing always line up with
@@ -1515,8 +1569,10 @@ function getShapePoints(drawing) {
 
 function renderDrawing(drawing) {
   const lineSeries = chart.addLineSeries({
-    color: drawing.color, lineWidth: 2, priceLineVisible: false,
-    lastValueVisible: false, crosshairMarkerVisible: false,
+    color: colorWithOpacity(drawing.color, drawing.opacity != null ? drawing.opacity : 1),
+    lineWidth: drawing.lineWidth || 2,
+    lineStyle: LINE_STYLE_MAP[drawing.lineStyle || 'solid'],
+    priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
     // Excludes this series from the right price scale's auto-fit
     // computation - repeatedly recomputing autoscale on every setData()
     // call is the other documented trigger for this library's
@@ -1528,8 +1584,31 @@ function renderDrawing(drawing) {
   drawing.series = lineSeries;
 }
 
+// Cheap style-only update (color/opacity/thickness/line-type) via the
+// series' own applyOptions - no need to remove/recreate the series the
+// way redrawShape does for actual point changes.
+function applyShapeStyle(d) {
+  if (!d.series) return;
+  d.series.applyOptions({
+    color: colorWithOpacity(d.color, d.opacity != null ? d.opacity : 1),
+    lineWidth: d.lineWidth || 2,
+    lineStyle: LINE_STYLE_MAP[d.lineStyle || 'solid'],
+  });
+}
+
+function applyHlineStyle(pl) {
+  pl.lwcHandle.applyOptions({
+    color: colorWithOpacity(pl.colorHex || '#2962ff', pl.opacity != null ? pl.opacity : 1),
+    lineWidth: pl.lineWidth || 1,
+    lineStyle: LINE_STYLE_MAP[pl.lineStyle || 'dashed'],
+  });
+}
+
 function addUserDrawing(type, time1, price1, time2, price2, color, source) {
-  const drawing = { type, time1, price1, time2, price2, color, source };
+  const drawing = {
+    type, time1, price1, time2, price2, color, source,
+    opacity: 1, lineWidth: 2, lineStyle: 'solid',
+  };
   renderDrawing(drawing);
   userDrawings.push(drawing);
   updateOutputBox();
@@ -1652,31 +1731,79 @@ function findDrawingAt(x, y) {
   return null;
 }
 
-function clearSelectionVisual() {
-  if (!selectedDrawing) return;
-  if (selectedDrawing.kind === 'shape' && selectedDrawing.ref.series) {
-    selectedDrawing.ref.series.applyOptions({ lineWidth: 2 });
-  } else if (selectedDrawing.kind === 'hline' && selectedDrawing.ref.lwcHandle) {
-    selectedDrawing.ref.lwcHandle.applyOptions({ lineWidth: 1 });
-  }
-}
+// Selection is now indicated purely by the handles/toolbar (below),
+// not by temporarily thickening the line - now that there's a real
+// style panel, showing the line at its exact configured thickness at
+// all times is less confusing (what-you-see-is-what-you-get).
+let settingsPanelOpen = false;
 
 function selectDrawing(sel) {
-  clearSelectionVisual();
   selectedDrawing = sel;
-  if (sel) {
-    if (sel.kind === 'shape' && sel.ref.series) sel.ref.series.applyOptions({ lineWidth: 3 });
-    else if (sel.kind === 'hline' && sel.ref.lwcHandle) sel.ref.lwcHandle.applyOptions({ lineWidth: 2 });
-  }
+  settingsPanelOpen = false;
   renderSelectionOverlay();
 }
 
 function redrawShape(drawing) {
   if (drawing.series) chart.removeSeries(drawing.series);
   renderDrawing(drawing);
-  if (selectedDrawing && selectedDrawing.kind === 'shape' && selectedDrawing.ref === drawing) {
-    drawing.series.applyOptions({ lineWidth: 3 });
-  }
+}
+
+// Finds the bar index for a given time, so dragging can move a shape by
+// a whole number of bars (snapping to real candles) rather than by raw
+// pixel/time math, which would drift off the actual data.
+function findBarIndex(t) {
+  const tn = timeToNumeric(t);
+  return barsData.findIndex(b => timeToNumeric(b.time) === tn);
+}
+
+// Drag-to-move for the midpoint handle: translates every point of the
+// shape by the same bar-offset and price-offset as the mouse, so the
+// whole line moves as a unit while keeping its length/slope.
+function startTranslateDrag(d, evt) {
+  evt.preventDefault();
+  evt.stopPropagation();
+  const startXY = screenToChartXY(evt);
+  const startTime = chart.timeScale().coordinateToTime(startXY.x);
+  const startPrice = series.coordinateToPrice(startXY.y);
+  if (startTime === null || startPrice === null) return;
+  const startBarIdx = findBarIndex(startTime);
+  if (startBarIdx === -1) return;
+
+  const origTime1 = d.time1, origPrice1 = d.price1, origBarIdx1 = findBarIndex(d.time1);
+  const origTime2 = d.time2, origPrice2 = d.price2;
+  const origBarIdx2 = d.type !== 'hray' && d.time2 != null ? findBarIndex(d.time2) : null;
+
+  const onMove = (ev) => {
+    const { x, y } = screenToChartXY(ev);
+    const t = chart.timeScale().coordinateToTime(x);
+    const p = series.coordinateToPrice(y);
+    if (t === null || p === null) return;
+    const curBarIdx = findBarIndex(t);
+    if (curBarIdx === -1) return;
+    const barDelta = curBarIdx - startBarIdx;
+    const priceDelta = p - startPrice;
+
+    if (origBarIdx1 !== -1 && barsData[origBarIdx1 + barDelta]) {
+      d.time1 = barsData[origBarIdx1 + barDelta].time;
+      d.price1 = origPrice1 + priceDelta;
+    }
+    if (origBarIdx2 !== null && origBarIdx2 !== -1 && barsData[origBarIdx2 + barDelta]) {
+      d.time2 = barsData[origBarIdx2 + barDelta].time;
+      d.price2 = origPrice2 + priceDelta;
+    } else if (d.type === 'hray') {
+      // hray only stores one point - price moves freely, but keep the
+      // shape identical if the bar offset couldn't be applied.
+    }
+    redrawShape(d);
+    renderSelectionOverlay();
+  };
+  const onUp = () => {
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+    updateOutputBox();
+  };
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
 }
 
 function deleteSelectedDrawing() {
@@ -1695,9 +1822,128 @@ function deleteSelectedDrawing() {
     }
   }
   selectedDrawing = null;
+  settingsPanelOpen = false;
   document.getElementById('drawing-overlay').innerHTML = '';
   updateOutputBox();
   setStatus('Drawing deleted.', false);
+}
+
+// Renders the color/opacity/thickness/line-type panel for whichever
+// drawing is selected. `target` is the userDrawings item or priceLines
+// item itself; `kind` is 'shape' or 'hline' since they're styled via
+// different Lightweight Charts APIs (series.applyOptions vs
+// priceLine.applyOptions).
+function renderStylePanel(container, x, y, target, kind) {
+  const panel = document.createElement('div');
+  panel.className = 'drawing-settings-panel';
+  panel.style.left = x + 'px';
+  panel.style.top = y + 'px';
+  panel.addEventListener('mousedown', (e) => e.stopPropagation());
+  panel.addEventListener('click', (e) => e.stopPropagation());
+
+  const currentHex = kind === 'hline' ? (target.colorHex || '#2962ff') : (target.color || '#2962ff');
+  const currentOpacity = target.opacity != null ? target.opacity : 1;
+  const currentWidth = target.lineWidth || (kind === 'hline' ? 1 : 2);
+  const currentStyle = target.lineStyle || (kind === 'hline' ? 'dashed' : 'solid');
+
+  function applyChange() {
+    if (kind === 'hline') applyHlineStyle(target);
+    else applyShapeStyle(target);
+    updateOutputBox();
+  }
+
+  function addRow(labelText, inputEl) {
+    const row = document.createElement('div');
+    row.className = 'row';
+    const label = document.createElement('label');
+    label.textContent = labelText;
+    row.appendChild(label);
+    row.appendChild(inputEl);
+    panel.appendChild(row);
+  }
+
+  const colorInput = document.createElement('input');
+  colorInput.type = 'color';
+  colorInput.value = currentHex;
+  colorInput.addEventListener('input', () => {
+    if (kind === 'hline') {
+      target.colorHex = colorInput.value;
+      target.color = rgbToColorName(hexToRgbString(colorInput.value)) || 'blue';
+    } else {
+      target.color = colorInput.value;
+    }
+    applyChange();
+  });
+  addRow('Color', colorInput);
+
+  const opInput = document.createElement('input');
+  opInput.type = 'range';
+  opInput.min = '10'; opInput.max = '100'; opInput.step = '5';
+  opInput.value = String(Math.round(currentOpacity * 100));
+  opInput.addEventListener('input', () => {
+    target.opacity = parseInt(opInput.value, 10) / 100;
+    applyChange();
+  });
+  addRow('Opacity', opInput);
+
+  const wSelect = document.createElement('select');
+  [1, 2, 3, 4].forEach((v) => {
+    const opt = document.createElement('option');
+    opt.value = String(v);
+    opt.textContent = v + 'px';
+    if (v === currentWidth) opt.selected = true;
+    wSelect.appendChild(opt);
+  });
+  wSelect.addEventListener('change', () => {
+    target.lineWidth = parseInt(wSelect.value, 10);
+    applyChange();
+  });
+  addRow('Thickness', wSelect);
+
+  const sSelect = document.createElement('select');
+  [['solid', 'Solid'], ['dashed', 'Dashed'], ['dotted', 'Dotted']].forEach(([v, label]) => {
+    const opt = document.createElement('option');
+    opt.value = v;
+    opt.textContent = label;
+    if (v === currentStyle) opt.selected = true;
+    sSelect.appendChild(opt);
+  });
+  sSelect.addEventListener('change', () => {
+    target.lineStyle = sSelect.value;
+    applyChange();
+  });
+  addRow('Line', sSelect);
+
+  container.appendChild(panel);
+}
+
+// Renders the small floating toolbar (⚙ Style, 🗑 Delete) for the
+// current selection, and the style panel underneath it if open.
+function renderActionBar(container, x, y, target, kind) {
+  const bar = document.createElement('div');
+  bar.className = 'drawing-toolbar-float';
+  bar.style.left = x + 'px';
+  bar.style.top = y + 'px';
+
+  const settingsBtn = document.createElement('button');
+  settingsBtn.textContent = '⚙ Style';
+  settingsBtn.addEventListener('mousedown', (e) => e.stopPropagation());
+  settingsBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    settingsPanelOpen = !settingsPanelOpen;
+    renderSelectionOverlay();
+  });
+  bar.appendChild(settingsBtn);
+
+  const delBtn = document.createElement('button');
+  delBtn.textContent = '🗑 Delete';
+  delBtn.addEventListener('mousedown', (e) => e.stopPropagation());
+  delBtn.addEventListener('click', (e) => { e.stopPropagation(); deleteSelectedDrawing(); });
+  bar.appendChild(delBtn);
+
+  container.appendChild(bar);
+
+  if (settingsPanelOpen) renderStylePanel(container, x, y + 34, target, kind);
 }
 
 // Renders the selection handles (draggable circles at each editable
@@ -1711,9 +1957,9 @@ function renderSelectionOverlay() {
   container.innerHTML = '';
   if (!selectedDrawing) return;
 
-  function makeHandle(x, y, onMove) {
+  function makeHandle(x, y, onMove, extraClass) {
     const h = document.createElement('div');
-    h.className = 'drawing-handle';
+    h.className = 'drawing-handle' + (extraClass ? ' ' + extraClass : '');
     h.style.left = x + 'px';
     h.style.top = y + 'px';
     h.addEventListener('mousedown', (evt) => {
@@ -1729,19 +1975,6 @@ function renderSelectionOverlay() {
       document.addEventListener('mouseup', up);
     });
     container.appendChild(h);
-  }
-
-  function makeDeleteBtn(x, y) {
-    const bar = document.createElement('div');
-    bar.className = 'drawing-toolbar-float';
-    bar.style.left = x + 'px';
-    bar.style.top = y + 'px';
-    const btn = document.createElement('button');
-    btn.textContent = '🗑 Delete';
-    btn.addEventListener('mousedown', (e) => e.stopPropagation());
-    btn.addEventListener('click', (e) => { e.stopPropagation(); deleteSelectedDrawing(); });
-    bar.appendChild(btn);
-    container.appendChild(bar);
   }
 
   if (selectedDrawing.kind === 'shape') {
@@ -1791,7 +2024,19 @@ function renderSelectionOverlay() {
     const mx2 = chart.timeScale().timeToCoordinate(rp2.time);
     const my2 = series.priceToCoordinate(rp2.value);
     if (mx1 !== null && my1 !== null && mx2 !== null && my2 !== null) {
-      makeDeleteBtn((mx1 + mx2) / 2, Math.min(my1, my2) - 4);
+      const midX = (mx1 + mx2) / 2, midY = (my1 + my2) / 2;
+      // Midpoint handle: drag to move the whole line as a unit rather
+      // than reshaping it from one end. Wired directly (not through
+      // makeHandle's onMove-per-mousemove pattern) since the drag needs
+      // the original mousedown event to compute a starting offset.
+      const moveHandle = document.createElement('div');
+      moveHandle.className = 'drawing-handle drawing-handle-move';
+      moveHandle.style.left = midX + 'px';
+      moveHandle.style.top = midY + 'px';
+      moveHandle.addEventListener('mousedown', (evt) => startTranslateDrag(d, evt));
+      container.appendChild(moveHandle);
+
+      renderActionBar(container, midX, Math.min(my1, my2) - 4, d, 'shape');
     }
   } else if (selectedDrawing.kind === 'hline') {
     const pl = selectedDrawing.ref;
@@ -1807,7 +2052,7 @@ function renderSelectionOverlay() {
       pl.lwcHandle.applyOptions({ price: p });
       renderSelectionOverlay();
     });
-    makeDeleteBtn(midX, y - 4);
+    renderActionBar(container, midX, y - 4, pl, 'hline');
   }
 }
 
@@ -1829,7 +2074,10 @@ chart.subscribeClick(param => {
       price, color: '#2962ff', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed,
       axisLabelVisible: true, title: '',
     });
-    priceLines.push({ price, color: 'blue', label: '', lwcHandle: handle, source: 'user' });
+    priceLines.push({
+      price, color: 'blue', colorHex: '#2962ff', opacity: 1, lineWidth: 1, lineStyle: 'dashed',
+      label: '', lwcHandle: handle, source: 'user',
+    });
     updateOutputBox();
     setActiveDrawTool('none');
     return;
@@ -1897,15 +2145,20 @@ function renderCommands() {
       addedMarkers++;
     } else if (cmd === 'LINE') {
       if (!attrs.price) { errors.push(`LINE missing price: "${line}"`); continue; }
+      const colorName = attrs.color || 'blue';
+      const colorHex = colorMap[colorName] || '#2962ff';
       const handle = series.createPriceLine({
         price: parseFloat(attrs.price),
-        color: colorMap[attrs.color] || '#2962ff',
+        color: colorHex,
         lineWidth: 1,
         lineStyle: LightweightCharts.LineStyle.Dashed,
         axisLabelVisible: true,
         title: attrs.label || '',
       });
-      priceLines.push({ price: parseFloat(attrs.price), color: attrs.color || 'blue', label: attrs.label || '', lwcHandle: handle, source: 'claude' });
+      priceLines.push({
+        price: parseFloat(attrs.price), color: colorName, colorHex, opacity: 1, lineWidth: 1, lineStyle: 'dashed',
+        label: attrs.label || '', lwcHandle: handle, source: 'claude',
+      });
       addedLines++;
     } else if (cmd === 'TRENDLINE' || cmd === 'RAY') {
       if (!attrs.time1 || !attrs.price1 || !attrs.time2 || !attrs.price2) {

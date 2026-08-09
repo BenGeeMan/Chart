@@ -759,7 +759,7 @@
       <div id="earnings-overlay"></div>
       <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">46</div>
+      <div id="build-number">48</div>
       <div id="main-no-data">No Data</div>
     </div>
     <div id="rsi-chart-container">
@@ -1961,7 +1961,16 @@ function createDrawingPane(cfg) {
       if (t === null || p === null || (cfg.isLog && p <= 0)) return;
       const curBarIdx = findBarIndex(t);
       if (curBarIdx === -1) return;
-      const barDelta = curBarIdx - startBarIdx;
+      let barDelta = curBarIdx - startBarIdx;
+      // Clamp the shift so BOTH points stay within the loaded bars
+      // range together. Without this, whichever point hits the edge
+      // first silently freezes there while the other keeps moving -
+      // which looks like the whole line pivoting around the frozen
+      // point instead of translating as a rigid unit.
+      for (const idx of [origBarIdx1, origBarIdx2]) {
+        if (idx === null || idx === -1) continue;
+        barDelta = Math.max(-idx, Math.min(bars.length - 1 - idx, barDelta));
+      }
       const priceDelta = p - startPrice;
       const priceRatio = cfg.isLog ? p / startPrice : null;
 
@@ -2382,6 +2391,45 @@ document.addEventListener('keydown', (e) => {
 const shapeMap = { arrowUp: 'arrowUp', arrowDown: 'arrowDown', circle: 'circle' };
 const colorMap = { green: '#26a69a', red: '#ef5350', blue: '#2962ff' };
 
+// Shared handlers for LINE/TRENDLINE/RAY/HRAY-shaped commands, used by
+// both the main-chart and RSI_-prefixed variants below - `pane` is
+// whichever createDrawingPane() controller (mainPane or rsiPane) the
+// command should land on.
+function handleHlineCommand(pane, attrs, line, errors) {
+  if (!attrs.price) { errors.push(`LINE missing price: "${line}"`); return false; }
+  // Kept dashed/1px here (distinct from the solid/2px default a
+  // hand-drawn horizontal line gets) as a visual cue that this
+  // particular line came from a pasted Claude command.
+  pane.addHline(parseFloat(attrs.price), attrs.color || 'blue', attrs.label || '', 'claude', 1, 'dashed');
+  return true;
+}
+
+function handleTrendRayCommand(pane, cmd, attrs, line, errors) {
+  if (!attrs.time1 || !attrs.price1 || !attrs.time2 || !attrs.price2) {
+    errors.push(`${cmd} missing time1/price1/time2/price2: "${line}"`);
+    return false;
+  }
+  if (timeToNumeric(attrs.time1) === timeToNumeric(attrs.time2)) {
+    // time1/time2 on the same bar crashes the charting library outright
+    // (see the comment above chart.subscribeCrosshairMove in
+    // createDrawingPane) - reject rather than let it through.
+    errors.push(`${cmd} time1 and time2 must be different dates: "${line}"`);
+    return false;
+  }
+  pane.addUserDrawing(
+    cmd.endsWith('TRENDLINE') ? 'trendline' : 'ray',
+    attrs.time1, parseFloat(attrs.price1), attrs.time2, parseFloat(attrs.price2),
+    colorMap[attrs.color] || '#2962ff', 'claude'
+  );
+  return true;
+}
+
+function handleHrayCommand(pane, attrs, line, errors) {
+  if (!attrs.time || !attrs.price) { errors.push(`HRAY missing time/price: "${line}"`); return false; }
+  pane.addUserDrawing('hray', attrs.time, parseFloat(attrs.price), null, null, colorMap[attrs.color] || '#2962ff', 'claude');
+  return true;
+}
+
 function renderCommands() {
   const raw = document.getElementById('input-box').value;
   const lines = raw.split('\n').map(l => l.trim()).filter(Boolean);
@@ -2409,37 +2457,17 @@ function renderCommands() {
       });
       addedMarkers++;
     } else if (cmd === 'LINE') {
-      if (!attrs.price) { errors.push(`LINE missing price: "${line}"`); continue; }
-      // Kept dashed/1px here (distinct from the solid/2px default a
-      // hand-drawn horizontal line gets) as a visual cue that this
-      // particular line came from a pasted Claude command.
-      mainPane.addHline(parseFloat(attrs.price), attrs.color || 'blue', attrs.label || '', 'claude', 1, 'dashed');
-      addedLines++;
+      if (handleHlineCommand(mainPane, attrs, line, errors)) addedLines++;
+    } else if (cmd === 'RSI_LINE') {
+      if (handleHlineCommand(rsiPane, attrs, line, errors)) addedLines++;
     } else if (cmd === 'TRENDLINE' || cmd === 'RAY') {
-      if (!attrs.time1 || !attrs.price1 || !attrs.time2 || !attrs.price2) {
-        errors.push(`${cmd} missing time1/price1/time2/price2: "${line}"`);
-        continue;
-      }
-      if (timeToNumeric(attrs.time1) === timeToNumeric(attrs.time2)) {
-        // time1/time2 on the same bar crashes the charting library
-        // outright (see the comment above chart.subscribeCrosshairMove) -
-        // reject rather than let it through.
-        errors.push(`${cmd} time1 and time2 must be different dates: "${line}"`);
-        continue;
-      }
-      mainPane.addUserDrawing(
-        cmd === 'TRENDLINE' ? 'trendline' : 'ray',
-        attrs.time1, parseFloat(attrs.price1), attrs.time2, parseFloat(attrs.price2),
-        colorMap[attrs.color] || '#2962ff', 'claude'
-      );
-      addedLines++;
+      if (handleTrendRayCommand(mainPane, cmd, attrs, line, errors)) addedLines++;
+    } else if (cmd === 'RSI_TRENDLINE' || cmd === 'RSI_RAY') {
+      if (handleTrendRayCommand(rsiPane, cmd, attrs, line, errors)) addedLines++;
     } else if (cmd === 'HRAY') {
-      if (!attrs.time || !attrs.price) {
-        errors.push(`HRAY missing time/price: "${line}"`);
-        continue;
-      }
-      mainPane.addUserDrawing('hray', attrs.time, parseFloat(attrs.price), null, null, colorMap[attrs.color] || '#2962ff', 'claude');
-      addedLines++;
+      if (handleHrayCommand(mainPane, attrs, line, errors)) addedLines++;
+    } else if (cmd === 'RSI_HRAY') {
+      if (handleHrayCommand(rsiPane, attrs, line, errors)) addedLines++;
     } else {
       errors.push(`Unknown command: "${line}"`);
     }
@@ -2477,6 +2505,30 @@ function rgbToColorName(rgbString) {
   const match = rgbString.match(/(\d+),\s*(\d+),\s*(\d+)/);
   if (!match) return null;
   return COLOR_NAMES[`${match[1]},${match[2]},${match[3]}`] || null;
+}
+
+// Builds LINE/TRENDLINE/RAY/HRAY protocol lines for one pane's
+// drawings - `prefix` is '' for the main chart or 'RSI_' for the RSI
+// pane, so the same command shapes serve both without ambiguity about
+// which pane a pasted command targets.
+function buildDrawingCommandLines(priceLines, userDrawings, prefix) {
+  const out = [];
+  for (const pl of priceLines) {
+    const tag = pl.source === 'user' ? ' [added by user on chart]' : '';
+    out.push(`${prefix}LINE price=${pl.price} color=${pl.color} label="${pl.label}"${tag}`);
+  }
+  for (const d of userDrawings) {
+    const colorName = Object.keys(colorMap).find(k => colorMap[k] === d.color) || 'blue';
+    const tag = d.source === 'user' ? ' [added by user on chart]' : '';
+    if (d.type === 'trendline') {
+      out.push(`${prefix}TRENDLINE time1=${d.time1} price1=${d.price1} time2=${d.time2} price2=${d.price2} color=${colorName}${tag}`);
+    } else if (d.type === 'ray') {
+      out.push(`${prefix}RAY time1=${d.time1} price1=${d.price1} time2=${d.time2} price2=${d.price2} color=${colorName}${tag}`);
+    } else if (d.type === 'hray') {
+      out.push(`${prefix}HRAY time=${d.time1} price=${d.price1} color=${colorName}${tag}`);
+    }
+  }
+  return out;
 }
 
 function updateOutputBox() {
@@ -2522,32 +2574,17 @@ function updateOutputBox() {
     const tag = m.source === 'user' ? ' [added by user on chart]' : '';
     drawingLines.push(`MARKER date=${m.time} pos=${pos} shape=${shapeName} color=${colorName} text="${m.text}"${tag}`);
   }
-  for (const pl of mainPane.priceLines) {
-    const tag = pl.source === 'user' ? ' [added by user on chart]' : '';
-    drawingLines.push(`LINE price=${pl.price} color=${pl.color} label="${pl.label}"${tag}`);
-  }
-  for (const d of mainPane.userDrawings) {
-    const colorName = Object.keys(colorMap).find(k => colorMap[k] === d.color) || 'blue';
-    const tag = d.source === 'user' ? ' [added by user on chart]' : '';
-    if (d.type === 'trendline') {
-      drawingLines.push(`TRENDLINE time1=${d.time1} price1=${d.price1} time2=${d.time2} price2=${d.price2} color=${colorName}${tag}`);
-    } else if (d.type === 'ray') {
-      drawingLines.push(`RAY time1=${d.time1} price1=${d.price1} time2=${d.time2} price2=${d.price2} color=${colorName}${tag}`);
-    } else if (d.type === 'hray') {
-      drawingLines.push(`HRAY time=${d.time1} price=${d.price1} color=${colorName}${tag}`);
-    }
-  }
+  drawingLines.push(...buildDrawingCommandLines(mainPane.priceLines, mainPane.userDrawings, ''));
   lines.push(drawingLines.length ? drawingLines.join('\n') : '(none)');
 
-  // RSI drawings aren't described by the MARKER/LINE/TRENDLINE/RAY/HRAY
-  // text protocol yet - just note that they exist so this doesn't look
-  // like data silently went missing. Extending the protocol to cover
-  // them is a separate, not-yet-done piece of work.
-  const rsiDrawingCount = rsiPane.userDrawings.length + rsiPane.priceLines.length;
-  if (rsiDrawingCount > 0) {
+  // RSI drawings use an RSI_ prefix on the same LINE/TRENDLINE/RAY/HRAY
+  // command shapes, kept in their own section so it's unambiguous which
+  // pane a pasted command targets.
+  const rsiDrawingLines = buildDrawingCommandLines(rsiPane.priceLines, rsiPane.userDrawings, 'RSI_');
+  if (rsiDrawingLines.length) {
     lines.push('');
-    lines.push(`--- RSI Drawings (${rsiDrawingCount}) ---`);
-    lines.push('Not yet included in this text protocol - visible on the RSI panel itself.');
+    lines.push('--- RSI Drawings ---');
+    lines.push(rsiDrawingLines.join('\n'));
   }
 
   document.getElementById('output-box').value = lines.join('\n');

@@ -551,6 +551,19 @@
     width: 200px;
     transform: translate(-50%, 0);
   }
+  .panel-drag-handle {
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    padding-bottom: 6px;
+    margin-bottom: 8px;
+    border-bottom: 1px solid var(--panel-border);
+    cursor: move;
+    user-select: none;
+  }
+  .panel-drag-handle:hover { color: var(--text); }
   .drawing-settings-panel .row {
     display: flex;
     align-items: center;
@@ -871,7 +884,7 @@
       <div id="earnings-overlay"></div>
       <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">66</div>
+      <div id="build-number">67</div>
       <div id="main-no-data">No Data</div>
       <div id="rsi-settings-overlay"></div>
     </div>
@@ -1969,6 +1982,42 @@ let rsiEnabled = true;
 
 let rsiSettingsPanelOpen = false;
 
+// Makes `panelEl` draggable by mousedown-dragging on `handleEl`.
+// Shared by all three floating panels (Style, Timeframe, RSI
+// Settings) so they can always be pulled fully on-screen, however
+// they were originally positioned (anchored to a corner, centered via
+// transform, etc).
+function makeDraggable(panelEl, handleEl) {
+  handleEl.addEventListener('mousedown', (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    // Convert whatever positioning got it here (a centering transform,
+    // a right-anchored offset, ...) into explicit top-left pixels
+    // BEFORE the drag starts, using its actual on-screen box - so it
+    // doesn't jump the moment you start dragging.
+    const rect = panelEl.getBoundingClientRect();
+    const parentRect = panelEl.offsetParent.getBoundingClientRect();
+    const startLeft = rect.left - parentRect.left;
+    const startTop = rect.top - parentRect.top;
+    panelEl.style.left = startLeft + 'px';
+    panelEl.style.top = startTop + 'px';
+    panelEl.style.right = 'auto';
+    panelEl.style.transform = 'none';
+
+    const startX = e.clientX, startY = e.clientY;
+    const onMove = (ev) => {
+      panelEl.style.left = (startLeft + (ev.clientX - startX)) + 'px';
+      panelEl.style.top = (startTop + (ev.clientY - startY)) + 'px';
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  });
+}
+
 // Renders the RSI settings panel (⚙ button near the "RSI (14)" label).
 // Changes apply LIVE to the current RSI display immediately (so you see
 // the effect right away), but do NOT persist as "the default" for the
@@ -1992,6 +2041,12 @@ function renderRsiSettingsPanel() {
   panel.style.transform = 'translate(-50%, -50%)';
   panel.addEventListener('mousedown', (e) => e.stopPropagation());
   panel.addEventListener('click', (e) => e.stopPropagation());
+
+  const dragHandle = document.createElement('div');
+  dragHandle.className = 'panel-drag-handle';
+  dragHandle.textContent = 'RSI Settings';
+  panel.appendChild(dragHandle);
+  makeDraggable(panel, dragHandle);
 
   function addRow(labelText, inputEl) {
     const row = document.createElement('div');
@@ -2410,6 +2465,12 @@ function renderStylePanel(container, x, y, target, kind, onVisibilityChange, onF
   panel.addEventListener('mousedown', (e) => e.stopPropagation());
   panel.addEventListener('click', (e) => e.stopPropagation());
 
+  const dragHandle = document.createElement('div');
+  dragHandle.className = 'panel-drag-handle';
+  dragHandle.textContent = 'Style';
+  panel.appendChild(dragHandle);
+  makeDraggable(panel, dragHandle);
+
   const currentHex = kind === 'hline' ? (target.colorHex || '#2962ff') : (target.color || '#2962ff');
   const currentOpacity = target.opacity != null ? target.opacity : 1;
   const currentWidth = target.lineWidth || (kind === 'hline' ? 1 : 2);
@@ -2598,6 +2659,12 @@ function renderTimeframePanel(container, x, y, target, kind, onVisibilityChange,
   panel.style.top = y + 'px';
   panel.addEventListener('mousedown', (e) => e.stopPropagation());
   panel.addEventListener('click', (e) => e.stopPropagation());
+
+  const dragHandle = document.createElement('div');
+  dragHandle.className = 'panel-drag-handle';
+  dragHandle.textContent = 'Timeframe';
+  panel.appendChild(dragHandle);
+  makeDraggable(panel, dragHandle);
 
   // Drawings made before this feature existed won't have these fields;
   // treat that as "no restriction, column on" rather than invisible.

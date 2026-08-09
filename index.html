@@ -448,6 +448,53 @@
     color: #ffffff;
     line-height: 1;
   }
+  /* Selection handles + delete toolbar for editing an already-drawn
+     trendline/ray/horizontal-ray/horizontal-line. Plain HTML overlay,
+     same "exact pixel position" approach as .earnings-badge above -
+     positioned via the chart's own time/price-to-coordinate functions,
+     not the charting library's own drawing/marker system. */
+  #drawing-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 5;
+    pointer-events: none;
+    overflow: visible;
+  }
+  .drawing-handle {
+    position: absolute;
+    width: 10px;
+    height: 10px;
+    margin-left: -5px;
+    margin-top: -5px;
+    border-radius: 50%;
+    background: #ffffff;
+    border: 2px solid var(--accent);
+    cursor: grab;
+    pointer-events: auto;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+  }
+  .drawing-handle:active { cursor: grabbing; }
+  .drawing-toolbar-float {
+    position: absolute;
+    transform: translate(-50%, -100%);
+    margin-top: -10px;
+    display: flex;
+    background: #ffffff;
+    border: 1px solid var(--panel-border);
+    border-radius: 4px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+    pointer-events: auto;
+  }
+  .drawing-toolbar-float button {
+    background: transparent;
+    border: none;
+    padding: 4px 8px;
+    font-size: 11px;
+    color: var(--text);
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .drawing-toolbar-float button:hover { background: rgba(0,0,0,0.06); }
 
   #sidebar {
     background: var(--panel);
@@ -639,8 +686,9 @@
         <div class="row"><span class="label">AT (20)</span><span class="value" id="turnover-daily-at20">—</span></div>
       </div>
       <div id="earnings-overlay"></div>
+      <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">37</div>
+      <div id="build-number">38</div>
       <div id="main-no-data">No Data</div>
     </div>
     <div id="rsi-chart-container">
@@ -1212,6 +1260,8 @@ function loadTimeframe(tf) {
       priceLines = [];
       for (const d of userDrawings) if (d.series) chart.removeSeries(d.series);
       userDrawings = [];
+      selectedDrawing = null;
+      document.getElementById('drawing-overlay').innerHTML = '';
       updateOutputBox();
 
       document.querySelectorAll('.tf-btn').forEach(b => b.classList.toggle('active', b.dataset.tf === tf));
@@ -1436,25 +1486,39 @@ function extrapolatePrice(time1, price1, time2, price2, targetTime) {
   return price1 + slope * (tt - t1);
 }
 
+// Returns the two rendered {time, value} endpoints for a shape - for
+// Ray/Horizontal Ray this includes the same edge-extrapolation used at
+// render time, so selection handles and hit-testing always line up with
+// what's actually drawn on screen. Note: for Ray, the SECOND handle is
+// placed at the shape's real, stored, editable point (time2/price2) -
+// the point that defines the ray's slope - not at the rendered far edge,
+// since the edge is just a derived extension and dragging it directly
+// wouldn't map back to a meaningful stored value.
+function getShapePoints(drawing) {
+  let p1, p2;
+  if (drawing.type === 'trendline') {
+    p1 = { time: drawing.time1, value: drawing.price1 };
+    p2 = { time: drawing.time2, value: drawing.price2 };
+  } else if (drawing.type === 'ray') {
+    const goingRight = timeToNumeric(drawing.time2) >= timeToNumeric(drawing.time1);
+    const edgeTime = barsData.length ? (goingRight ? barsData[barsData.length - 1].time : barsData[0].time) : drawing.time2;
+    const edgePrice = extrapolatePrice(drawing.time1, drawing.price1, drawing.time2, drawing.price2, edgeTime);
+    p1 = { time: drawing.time1, value: drawing.price1 };
+    p2 = { time: edgeTime, value: edgePrice };
+  } else if (drawing.type === 'hray') {
+    const edgeTime = barsData.length ? barsData[barsData.length - 1].time : drawing.time1;
+    p1 = { time: drawing.time1, value: drawing.price1 };
+    p2 = { time: edgeTime, value: drawing.price1 };
+  }
+  return [p1, p2].sort((a, b) => timeToNumeric(a.time) - timeToNumeric(b.time));
+}
+
 function renderDrawing(drawing) {
   const lineSeries = chart.addLineSeries({
     color: drawing.color, lineWidth: 2, priceLineVisible: false,
     lastValueVisible: false, crosshairMarkerVisible: false,
   });
-  let points;
-  if (drawing.type === 'trendline') {
-    points = [{ time: drawing.time1, value: drawing.price1 }, { time: drawing.time2, value: drawing.price2 }];
-  } else if (drawing.type === 'ray') {
-    const goingRight = timeToNumeric(drawing.time2) >= timeToNumeric(drawing.time1);
-    const edgeTime = barsData.length ? (goingRight ? barsData[barsData.length - 1].time : barsData[0].time) : drawing.time2;
-    const edgePrice = extrapolatePrice(drawing.time1, drawing.price1, drawing.time2, drawing.price2, edgeTime);
-    points = [{ time: drawing.time1, value: drawing.price1 }, { time: edgeTime, value: edgePrice }];
-  } else if (drawing.type === 'hray') {
-    const edgeTime = barsData.length ? barsData[barsData.length - 1].time : drawing.time1;
-    points = [{ time: drawing.time1, value: drawing.price1 }, { time: edgeTime, value: drawing.price1 }];
-  }
-  points.sort((a, b) => timeToNumeric(a.time) - timeToNumeric(b.time));
-  lineSeries.setData(points);
+  lineSeries.setData(getShapePoints(drawing));
   drawing.series = lineSeries;
 }
 
@@ -1470,21 +1534,251 @@ function addUserDrawing(type, time1, price1, time2, price2, color, source) {
 // then endpoint); Horizontal Line and Horizontal Ray only need one,
 // since their second coordinate is implied. After completing a shape,
 // the tool automatically deselects back to the cursor.
+//
+// While a Trend Line / Ray is mid-draw (one point placed, waiting on the
+// second), a dashed preview line follows the mouse via previewSeries -
+// pointMarkersVisible gives a visible dot at both the anchor and the
+// live end, so it's clear where the line will land before the second
+// click commits it.
 let activeDrawTool = 'none';
 let pendingDrawPoint = null;
+let previewSeries = null;
+
+// Selection state for editing an already-drawn shape/line: which one is
+// selected, and (while a handle is being dragged) the in-progress drag.
+// { kind: 'shape', ref: <userDrawings item> } or { kind: 'hline', ref: <priceLines item> }
+let selectedDrawing = null;
+
+function screenToChartXY(evt) {
+  const rect = chartEl.getBoundingClientRect();
+  return { x: evt.clientX - rect.left, y: evt.clientY - rect.top };
+}
+
+function cancelPendingDraw() {
+  if (previewSeries) { chart.removeSeries(previewSeries); previewSeries = null; }
+  pendingDrawPoint = null;
+}
 
 function setActiveDrawTool(tool) {
+  cancelPendingDraw();
   activeDrawTool = tool;
-  pendingDrawPoint = null;
   document.querySelectorAll('.draw-tool-btn').forEach(b => b.classList.toggle('active', b.dataset.tool === tool));
+  if (tool !== 'none') selectDrawing(null);
 }
 
 document.querySelectorAll('.draw-tool-btn').forEach(btn => {
   btn.addEventListener('click', () => setActiveDrawTool(btn.dataset.tool));
 });
 
+// Cancel an in-progress draw or clear a selection without hunting for
+// the cursor button.
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  if (activeDrawTool !== 'none') setActiveDrawTool('none');
+  else if (selectedDrawing) selectDrawing(null);
+});
+
+chart.subscribeCrosshairMove(param => {
+  if (!pendingDrawPoint || !previewSeries) return;
+  if (!param.point || !param.time) return;
+  const price = series.coordinateToPrice(param.point.y);
+  if (price === null) return;
+  const pts = [
+    { time: pendingDrawPoint.time, value: pendingDrawPoint.price },
+    { time: param.time, value: price },
+  ].sort((a, b) => timeToNumeric(a.time) - timeToNumeric(b.time));
+  previewSeries.setData(pts);
+});
+
+// --- Distance from a point to a line segment, in pixel space - used to
+// hit-test clicks against already-drawn shapes when the cursor tool is
+// active, so clicking near a line selects it. ---
+function distToSegment(px, py, x1, y1, x2, y2) {
+  const dx = x2 - x1, dy = y2 - y1;
+  const lenSq = dx * dx + dy * dy;
+  let t = lenSq === 0 ? 0 : ((px - x1) * dx + (py - y1) * dy) / lenSq;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy));
+}
+
+function findDrawingAt(x, y) {
+  const HIT = 6;
+  for (const d of userDrawings) {
+    const [p1, p2] = getShapePoints(d);
+    const x1 = chart.timeScale().timeToCoordinate(p1.time);
+    const y1 = series.priceToCoordinate(p1.value);
+    const x2 = chart.timeScale().timeToCoordinate(p2.time);
+    const y2 = series.priceToCoordinate(p2.value);
+    if (x1 === null || y1 === null || x2 === null || y2 === null) continue;
+    if (distToSegment(x, y, x1, y1, x2, y2) <= HIT) return { kind: 'shape', ref: d };
+  }
+  for (const pl of priceLines) {
+    const y1 = series.priceToCoordinate(pl.price);
+    if (y1 === null) continue;
+    if (Math.abs(y - y1) <= HIT) return { kind: 'hline', ref: pl };
+  }
+  return null;
+}
+
+function clearSelectionVisual() {
+  if (!selectedDrawing) return;
+  if (selectedDrawing.kind === 'shape' && selectedDrawing.ref.series) {
+    selectedDrawing.ref.series.applyOptions({ lineWidth: 2 });
+  } else if (selectedDrawing.kind === 'hline' && selectedDrawing.ref.lwcHandle) {
+    selectedDrawing.ref.lwcHandle.applyOptions({ lineWidth: 1 });
+  }
+}
+
+function selectDrawing(sel) {
+  clearSelectionVisual();
+  selectedDrawing = sel;
+  if (sel) {
+    if (sel.kind === 'shape' && sel.ref.series) sel.ref.series.applyOptions({ lineWidth: 3 });
+    else if (sel.kind === 'hline' && sel.ref.lwcHandle) sel.ref.lwcHandle.applyOptions({ lineWidth: 2 });
+  }
+  renderSelectionOverlay();
+}
+
+function redrawShape(drawing) {
+  if (drawing.series) chart.removeSeries(drawing.series);
+  renderDrawing(drawing);
+  if (selectedDrawing && selectedDrawing.kind === 'shape' && selectedDrawing.ref === drawing) {
+    drawing.series.applyOptions({ lineWidth: 3 });
+  }
+}
+
+function deleteSelectedDrawing() {
+  if (!selectedDrawing) return;
+  if (selectedDrawing.kind === 'shape') {
+    const idx = userDrawings.indexOf(selectedDrawing.ref);
+    if (idx !== -1) {
+      if (selectedDrawing.ref.series) chart.removeSeries(selectedDrawing.ref.series);
+      userDrawings.splice(idx, 1);
+    }
+  } else if (selectedDrawing.kind === 'hline') {
+    const idx = priceLines.indexOf(selectedDrawing.ref);
+    if (idx !== -1) {
+      series.removePriceLine(selectedDrawing.ref.lwcHandle);
+      priceLines.splice(idx, 1);
+    }
+  }
+  selectedDrawing = null;
+  document.getElementById('drawing-overlay').innerHTML = '';
+  updateOutputBox();
+  setStatus('Drawing deleted.', false);
+}
+
+// Renders the selection handles (draggable circles at each editable
+// point) and the floating "Delete" button for whichever drawing is
+// currently selected. Plain HTML positioned via the chart's own
+// time/price-to-coordinate conversion (see the #drawing-overlay CSS
+// comment) - called on selection change, on drag, and whenever the
+// visible range changes (pan/zoom/resize) so handles track the chart.
+function renderSelectionOverlay() {
+  const container = document.getElementById('drawing-overlay');
+  container.innerHTML = '';
+  if (!selectedDrawing) return;
+
+  function makeHandle(x, y, onMove) {
+    const h = document.createElement('div');
+    h.className = 'drawing-handle';
+    h.style.left = x + 'px';
+    h.style.top = y + 'px';
+    h.addEventListener('mousedown', (evt) => {
+      evt.preventDefault();
+      evt.stopPropagation();
+      const move = (ev) => onMove(ev);
+      const up = () => {
+        document.removeEventListener('mousemove', move);
+        document.removeEventListener('mouseup', up);
+        updateOutputBox();
+      };
+      document.addEventListener('mousemove', move);
+      document.addEventListener('mouseup', up);
+    });
+    container.appendChild(h);
+  }
+
+  function makeDeleteBtn(x, y) {
+    const bar = document.createElement('div');
+    bar.className = 'drawing-toolbar-float';
+    bar.style.left = x + 'px';
+    bar.style.top = y + 'px';
+    const btn = document.createElement('button');
+    btn.textContent = '🗑 Delete';
+    btn.addEventListener('mousedown', (e) => e.stopPropagation());
+    btn.addEventListener('click', (e) => { e.stopPropagation(); deleteSelectedDrawing(); });
+    bar.appendChild(btn);
+    container.appendChild(bar);
+  }
+
+  if (selectedDrawing.kind === 'shape') {
+    const d = selectedDrawing.ref;
+    const x1 = chart.timeScale().timeToCoordinate(d.time1);
+    const y1 = series.priceToCoordinate(d.price1);
+    if (x1 === null || y1 === null) return;
+    makeHandle(x1, y1, (ev) => {
+      const { x, y } = screenToChartXY(ev);
+      const t = chart.timeScale().coordinateToTime(x);
+      const p = series.coordinateToPrice(y);
+      if (t === null || p === null) return;
+      d.time1 = t; d.price1 = p;
+      redrawShape(d);
+      renderSelectionOverlay();
+    });
+
+    if (d.type === 'trendline' || d.type === 'ray') {
+      const x2 = chart.timeScale().timeToCoordinate(d.time2);
+      const y2 = series.priceToCoordinate(d.price2);
+      if (x2 !== null && y2 !== null) {
+        makeHandle(x2, y2, (ev) => {
+          const { x, y } = screenToChartXY(ev);
+          const t = chart.timeScale().coordinateToTime(x);
+          const p = series.coordinateToPrice(y);
+          if (t === null || p === null) return;
+          d.time2 = t; d.price2 = p;
+          redrawShape(d);
+          renderSelectionOverlay();
+        });
+      }
+    }
+
+    const [rp1, rp2] = getShapePoints(d);
+    const mx1 = chart.timeScale().timeToCoordinate(rp1.time);
+    const my1 = series.priceToCoordinate(rp1.value);
+    const mx2 = chart.timeScale().timeToCoordinate(rp2.time);
+    const my2 = series.priceToCoordinate(rp2.value);
+    if (mx1 !== null && my1 !== null && mx2 !== null && my2 !== null) {
+      makeDeleteBtn((mx1 + mx2) / 2, Math.min(my1, my2) - 4);
+    }
+  } else if (selectedDrawing.kind === 'hline') {
+    const pl = selectedDrawing.ref;
+    const y = series.priceToCoordinate(pl.price);
+    if (y === null) return;
+    const priceScaleWidth = chart.priceScale('right').width();
+    const midX = (chartEl.clientWidth - priceScaleWidth) / 2;
+    makeHandle(midX, y, (ev) => {
+      const { y: ny } = screenToChartXY(ev);
+      const p = series.coordinateToPrice(ny);
+      if (p === null) return;
+      pl.price = p;
+      pl.lwcHandle.applyOptions({ price: p });
+      renderSelectionOverlay();
+    });
+    makeDeleteBtn(midX, y - 4);
+  }
+}
+
 chart.subscribeClick(param => {
-  if (activeDrawTool === 'none' || !param.time || !param.point) return;
+  // Cursor tool: click near an existing drawing to select it (shows
+  // drag handles + a Delete button); click empty space to deselect.
+  if (activeDrawTool === 'none') {
+    if (!param.point) return;
+    selectDrawing(findDrawingAt(param.point.x, param.point.y));
+    return;
+  }
+
+  if (!param.time || !param.point) return;
   const price = series.coordinateToPrice(param.point.y);
   if (price === null) return;
 
@@ -1503,13 +1797,23 @@ chart.subscribeClick(param => {
     setActiveDrawTool('none');
     return;
   }
-  // trendline / ray - two clicks needed
+  // trendline / ray - two clicks needed. First click drops a preview
+  // line (with a marker dot at the anchor) that then follows the mouse
+  // via the subscribeCrosshairMove handler above until the second click.
   if (!pendingDrawPoint) {
     pendingDrawPoint = { time: param.time, price };
+    previewSeries = chart.addLineSeries({
+      color: '#2962ff', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed,
+      priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
+      pointMarkersVisible: true,
+    });
+    previewSeries.setData([{ time: pendingDrawPoint.time, value: pendingDrawPoint.price }]);
     setStatus('Click a second point to finish the line.', false);
     return;
   }
-  addUserDrawing(activeDrawTool, pendingDrawPoint.time, pendingDrawPoint.price, param.time, price, '#2962ff', 'user');
+  const anchor = pendingDrawPoint;
+  cancelPendingDraw();
+  addUserDrawing(activeDrawTool, anchor.time, anchor.price, param.time, price, '#2962ff', 'user');
   setActiveDrawTool('none');
 });
 
@@ -1594,6 +1898,8 @@ function clearAll() {
   priceLines = [];
   for (const d of userDrawings) if (d.series) chart.removeSeries(d.series);
   userDrawings = [];
+  selectedDrawing = null;
+  document.getElementById('drawing-overlay').innerHTML = '';
   document.getElementById('input-box').value = '';
   setStatus('Chart cleared.', false);
   updateOutputBox();
@@ -1831,13 +2137,17 @@ window.addEventListener('resize', () => {
     rsiChart.applyOptions({ width: rsiChartEl.clientWidth, height: rsiChartEl.clientHeight });
   }
   renderEarningsOverlay();
+  renderSelectionOverlay();
   positionDailyBox();
 });
 
-// Earnings triangles are plain HTML, not native chart elements, so they
-// need to be manually repositioned whenever the visible time range
-// changes (panning, zooming, scrolling).
-chart.timeScale().subscribeVisibleLogicalRangeChange(() => renderEarningsOverlay());
+// Earnings triangles (and drawing-selection handles) are plain HTML, not
+// native chart elements, so they need to be manually repositioned
+// whenever the visible time range changes (panning, zooming, scrolling).
+chart.timeScale().subscribeVisibleLogicalRangeChange(() => {
+  renderEarningsOverlay();
+  renderSelectionOverlay();
+});
 
 // Keeps the top-right "Current daily" box clear of the price axis labels
 // on the right - the axis width varies by ticker (e.g. "$379.13" is

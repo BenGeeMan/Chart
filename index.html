@@ -855,7 +855,7 @@
       <div id="earnings-overlay"></div>
       <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">59</div>
+      <div id="build-number">61</div>
       <div id="main-no-data">No Data</div>
     </div>
     <div id="rsi-chart-container">
@@ -892,6 +892,23 @@ const chartEl = document.getElementById('chart');
 let currentTicker = 'HPQ';
 let currentTF = 'daily';
 let barsData = [];
+
+// Same reason as above: createRsiChart() calls applyRsiSettings()
+// synchronously near the top of this script, which needs
+// LINE_STYLE_MAP - defining it down with the rest of the drawing-tools
+// style helpers (where it conceptually belongs) previously caused
+// exactly this "used before initialization" crash, silently breaking
+// the ENTIRE page (blank chart, empty watchlist, nothing loads) since
+// it happened before any of the real initialization code ran.
+const LINE_STYLE_MAP = {
+  solid: LightweightCharts.LineStyle.Solid,
+  dashed: LightweightCharts.LineStyle.Dashed,
+  // Regular "Dotted" renders as tiny, tightly-packed dots that read as
+  // near-identical to Dashed at a glance. SparseDotted uses the same
+  // dot shape with much wider gaps, which is what actually reads as
+  // visually distinct from a dashed line.
+  dotted: LightweightCharts.LineStyle.SparseDotted,
+};
 
 const chart = LightweightCharts.createChart(chartEl, {
   layout: {
@@ -1350,18 +1367,20 @@ function defaultTimeframes() {
   return out;
 }
 
-// Default relative-timeframe state: only "2 higher" ticked, a single
-// valid state rather than everything ticked at once (which looked like
-// a real selection but wasn't a state any actual click could produce -
-// confusing on a freshly-drawn shape). Since a range always includes
-// the home timeframe it's measured from (see matchesRelativeTF below),
-// this default still shows on the timeframe the drawing was drawn on,
-// plus 1 and 2 higher.
+// Default relative-timeframe state: "2 higher" and "2 lower" both
+// ticked (each side is radio-style/single-tick, but the two sides are
+// independent of each other, so both can be on at once). A single
+// tick per side rather than everything ticked at once (which looked
+// like a real selection but wasn't a state any actual click could
+// produce - confusing on a freshly-drawn shape). Since a range always
+// includes the home timeframe it's measured from (see matchesRelativeTF
+// below), this default still shows on the timeframe the drawing was
+// drawn on, plus 1-2 higher and 1-2 lower.
 function defaultRelativeTF() {
   return {
     current: false,
     higher1: false, higher2: true, higher3: false,
-    lower1: false, lower2: false, lower3: false,
+    lower1: false, lower2: true, lower3: false,
   };
 }
 
@@ -1466,7 +1485,11 @@ function getEffectiveTimeframeDefault(toolType) {
   const saved = toolDefaultsCache[toolType] && toolDefaultsCache[toolType].timeframe;
   return {
     timeframes: Object.assign({}, defaultTimeframes(), saved && saved.timeframes),
-    timeframesColumnEnabled: saved && saved.timeframesColumnEnabled !== undefined ? saved.timeframesColumnEnabled : true,
+    // Off by default - only the "relative to home" column restricts a
+    // new drawing's visibility out of the box; the absolute "Show on"
+    // column is available but starts bypassed until explicitly turned
+    // on (or a saved default says otherwise).
+    timeframesColumnEnabled: saved && saved.timeframesColumnEnabled !== undefined ? saved.timeframesColumnEnabled : false,
     relativeTF: Object.assign({}, defaultRelativeTF(), saved && saved.relativeTF),
     relativeTFColumnEnabled: saved && saved.relativeTFColumnEnabled !== undefined ? saved.relativeTFColumnEnabled : true,
   };
@@ -2095,16 +2118,6 @@ function hexToRgbString(hex) {
   if (!m) return hex;
   return `rgb(${parseInt(m[1], 16)}, ${parseInt(m[2], 16)}, ${parseInt(m[3], 16)})`;
 }
-
-const LINE_STYLE_MAP = {
-  solid: LightweightCharts.LineStyle.Solid,
-  dashed: LightweightCharts.LineStyle.Dashed,
-  // Regular "Dotted" renders as tiny, tightly-packed dots that read as
-  // near-identical to Dashed at a glance. SparseDotted uses the same
-  // dot shape with much wider gaps, which is what actually reads as
-  // visually distinct from a dashed line.
-  dotted: LightweightCharts.LineStyle.SparseDotted,
-};
 
 // Converts a drawing's stored time to whatever format the given bars
 // array actually uses (date string for daily-and-up, Unix timestamp for

@@ -552,18 +552,22 @@
     cursor: pointer;
   }
   .color-swatch.selected { outline: 2px solid var(--accent); outline-offset: 1px; }
-  .tf-checkbox-grid {
+  .tf-panel { width: 170px; }
+  .tf-two-col {
     display: flex;
-    flex-wrap: wrap;
-    gap: 6px 8px;
+    gap: 14px;
+  }
+  .tf-col {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
     flex: 1;
-    justify-content: flex-start;
   }
   .tf-checkbox {
     display: flex;
     align-items: center;
-    gap: 3px;
-    font-size: 10px;
+    gap: 5px;
+    font-size: 11px;
     color: var(--text);
     cursor: pointer;
     white-space: nowrap;
@@ -573,6 +577,12 @@
     width: 12px;
     height: 12px;
     cursor: pointer;
+  }
+  .tf-checkbox.tf-master {
+    font-weight: 700;
+    padding-bottom: 5px;
+    margin-bottom: 2px;
+    border-bottom: 1px solid var(--panel-border);
   }
 
   #sidebar {
@@ -767,7 +777,7 @@
       <div id="earnings-overlay"></div>
       <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">51</div>
+      <div id="build-number">52</div>
       <div id="main-no-data">No Data</div>
     </div>
     <div id="rsi-chart-container">
@@ -1159,6 +1169,11 @@ const TIMEFRAME_META = {
   quarterly: { intraday: false, label: 'Quarterly', short: 'Q' },
 };
 
+// Ordered lowest-to-highest, used by the "relative timeframe" column
+// (3 higher / 2 higher / 1 higher / current only / 1 lower / 2 lower /
+// 3 lower) to compute an offset from a drawing's home timeframe. Reuses
+// the same TF_ORDER already defined above for the Relative M10s EMAs.
+
 // New drawings show on every timeframe by default - this returns a
 // fresh {tfKey: true, ...} object for each one (never share a single
 // object across drawings, or unchecking one box would affect them all).
@@ -1166,6 +1181,37 @@ function defaultTimeframes() {
   const out = {};
   for (const key of Object.keys(TIMEFRAME_META)) out[key] = true;
   return out;
+}
+
+// Default relative-timeframe state: everything checked (matches any
+// timeframe relative to home) - "current" and the 6 higher/lower boxes
+// are mutually exclusive once the user actually interacts with them
+// (enforced in the panel's click handlers), but starting all-checked
+// means this column imposes no restriction until the user narrows it.
+function defaultRelativeTF() {
+  return {
+    current: true,
+    higher1: true, higher2: true, higher3: true,
+    lower1: true, lower2: true, lower3: true,
+  };
+}
+
+// Whether a drawing's relative-timeframe column matches `tfKey`, given
+// its fixed home timeframe (the timeframe active when it was created -
+// this never changes, so "1 higher" etc. always means the same actual
+// timeframe for a given drawing regardless of what's currently being
+// viewed elsewhere). Missing relativeTF/homeTF (older drawings, or the
+// feature never touched) imposes no restriction.
+function matchesRelativeTF(drawing, tfKey) {
+  if (!drawing.relativeTF || !drawing.homeTF) return true;
+  const homeIdx = TF_ORDER.indexOf(drawing.homeTF);
+  const targetIdx = TF_ORDER.indexOf(tfKey);
+  if (homeIdx === -1 || targetIdx === -1) return true;
+  const offset = targetIdx - homeIdx;
+  if (offset === 0) return drawing.relativeTF.current !== false;
+  const key = offset > 0 ? 'higher' + offset : 'lower' + Math.abs(offset);
+  if (Math.abs(offset) > 3) return false; // no checkbox exists past 3 - can't match
+  return drawing.relativeTF[key] !== false;
 }
 
 let markers = [];
@@ -1891,47 +1937,152 @@ function renderStylePanel(container, x, y, target, kind, onVisibilityChange) {
   container.appendChild(panel);
 }
 
-// Separate small panel just for the "which timeframes does this
-// drawing show on" checkboxes - split out from the Style panel above
-// so it's its own menu rather than one more row buried in there.
+// Separate small panel just for "which timeframes does this drawing
+// show on" - split out from the Style panel so it's its own menu.
+// Two columns, combined with AND (both must allow a timeframe for the
+// drawing to show there):
+//   - Absolute: one checkbox per real timeframe (5m/15m/1H/D/W/M/Q).
+//   - Relative to home: an offset from the timeframe this drawing was
+//     CREATED on (its "home" - fixed forever, doesn't change if you
+//     later view it elsewhere) - 3/2/1 higher, current (home) only,
+//     1/2/3 lower. "Current only" is mutually exclusive with the six
+//     higher/lower boxes; those six can combine freely with each
+//     other. Each column also has its own "All" master checkbox that
+//     remembers the individual selection it had before being switched
+//     off, and restores exactly that (not just all-true) when switched
+//     back on.
 // `onVisibilityChange` re-applies the drawing's visible/lineVisible
 // state for whichever timeframe is currently active, since toggling a
-// DIFFERENT timeframe's box shouldn't change what's shown right now.
+// box for a DIFFERENT timeframe shouldn't change what's shown right
+// now.
 function renderTimeframePanel(container, x, y, target, onVisibilityChange) {
   const panel = document.createElement('div');
-  panel.className = 'drawing-settings-panel';
+  panel.className = 'drawing-settings-panel tf-panel';
   panel.style.left = x + 'px';
   panel.style.top = y + 'px';
   panel.addEventListener('mousedown', (e) => e.stopPropagation());
   panel.addEventListener('click', (e) => e.stopPropagation());
 
-  // A drawing made before this feature existed won't have `timeframes`
-  // set at all; treat that the same as all-checked rather than leaving
-  // it invisible everywhere.
+  // Drawings made before this feature existed won't have these fields;
+  // treat that as "no restriction" rather than leaving them invisible.
   if (!target.timeframes) target.timeframes = defaultTimeframes();
+  if (!target.relativeTF) target.relativeTF = defaultRelativeTF();
 
-  const tfGrid = document.createElement('div');
-  tfGrid.className = 'tf-checkbox-grid';
-  Object.keys(TIMEFRAME_META).forEach((tfKey) => {
-    const tfLabel = document.createElement('label');
-    tfLabel.className = 'tf-checkbox';
+  const cols = document.createElement('div');
+  cols.className = 'tf-two-col';
+
+  // --- Column 1: absolute timeframes ---
+  const col1 = document.createElement('div');
+  col1.className = 'tf-col';
+  const absKeys = Object.keys(TIMEFRAME_META);
+  const absCheckboxes = [];
+
+  function commitChange() {
+    if (onVisibilityChange) onVisibilityChange();
+    updateOutputBox();
+  }
+
+  const master1 = document.createElement('label');
+  master1.className = 'tf-checkbox tf-master';
+  const master1Cb = document.createElement('input');
+  master1Cb.type = 'checkbox';
+  master1Cb.checked = absKeys.every((k) => target.timeframes[k] !== false);
+  master1Cb.addEventListener('mousedown', (e) => e.stopPropagation());
+  master1Cb.addEventListener('change', () => {
+    if (master1Cb.checked) {
+      const restore = target.timeframesMemory || defaultTimeframes();
+      absKeys.forEach((k) => { target.timeframes[k] = restore[k] !== false; });
+    } else {
+      target.timeframesMemory = Object.assign({}, target.timeframes);
+      absKeys.forEach((k) => { target.timeframes[k] = false; });
+    }
+    absCheckboxes.forEach(({ cb, key }) => { cb.checked = target.timeframes[key] !== false; });
+    commitChange();
+  });
+  master1.appendChild(master1Cb);
+  master1.appendChild(document.createTextNode('All'));
+  col1.appendChild(master1);
+
+  absKeys.forEach((tfKey) => {
+    const label = document.createElement('label');
+    label.className = 'tf-checkbox';
     const cb = document.createElement('input');
     cb.type = 'checkbox';
     cb.checked = target.timeframes[tfKey] !== false;
     cb.addEventListener('mousedown', (e) => e.stopPropagation());
     cb.addEventListener('change', () => {
       target.timeframes[tfKey] = cb.checked;
-      if (onVisibilityChange) onVisibilityChange();
-      updateOutputBox();
+      master1Cb.checked = absKeys.every((k) => target.timeframes[k] !== false);
+      commitChange();
     });
-    tfLabel.appendChild(cb);
-    tfLabel.appendChild(document.createTextNode(TIMEFRAME_META[tfKey].short));
-    tfGrid.appendChild(tfLabel);
+    label.appendChild(cb);
+    label.appendChild(document.createTextNode(TIMEFRAME_META[tfKey].short));
+    col1.appendChild(label);
+    absCheckboxes.push({ cb, key: tfKey });
   });
-  panel.appendChild(tfGrid);
+  cols.appendChild(col1);
 
+  // --- Column 2: relative to home timeframe ---
+  const col2 = document.createElement('div');
+  col2.className = 'tf-col';
+  const relKeys = ['higher3', 'higher2', 'higher1', 'current', 'lower1', 'lower2', 'lower3'];
+  const relLabels = { higher3: '+3', higher2: '+2', higher1: '+1', current: '=', lower1: '-1', lower2: '-2', lower3: '-3' };
+  const relCheckboxes = [];
+
+  const master2 = document.createElement('label');
+  master2.className = 'tf-checkbox tf-master';
+  const master2Cb = document.createElement('input');
+  master2Cb.type = 'checkbox';
+  master2Cb.checked = relKeys.every((k) => target.relativeTF[k] !== false);
+  master2Cb.addEventListener('mousedown', (e) => e.stopPropagation());
+  master2Cb.addEventListener('change', () => {
+    if (master2Cb.checked) {
+      const restore = target.relativeTFMemory || defaultRelativeTF();
+      relKeys.forEach((k) => { target.relativeTF[k] = restore[k] !== false; });
+    } else {
+      target.relativeTFMemory = Object.assign({}, target.relativeTF);
+      relKeys.forEach((k) => { target.relativeTF[k] = false; });
+    }
+    relCheckboxes.forEach(({ cb, key }) => { cb.checked = target.relativeTF[key] !== false; });
+    commitChange();
+  });
+  master2.appendChild(master2Cb);
+  master2.appendChild(document.createTextNode('All'));
+  col2.appendChild(master2);
+
+  relKeys.forEach((relKey) => {
+    const label = document.createElement('label');
+    label.className = 'tf-checkbox';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = target.relativeTF[relKey] !== false;
+    cb.addEventListener('mousedown', (e) => e.stopPropagation());
+    cb.addEventListener('change', () => {
+      target.relativeTF[relKey] = cb.checked;
+      // "current" (home) is mutually exclusive with the six higher/
+      // lower boxes - checking one clears the other side entirely.
+      if (cb.checked) {
+        if (relKey === 'current') {
+          relKeys.forEach((k) => { if (k !== 'current') target.relativeTF[k] = false; });
+        } else {
+          target.relativeTF.current = false;
+        }
+        relCheckboxes.forEach(({ cb: otherCb, key }) => { otherCb.checked = target.relativeTF[key] !== false; });
+      }
+      master2Cb.checked = relKeys.every((k) => target.relativeTF[k] !== false);
+      commitChange();
+    });
+    label.appendChild(cb);
+    label.appendChild(document.createTextNode(relLabels[relKey]));
+    col2.appendChild(label);
+    relCheckboxes.push({ cb, key: relKey });
+  });
+  cols.appendChild(col2);
+
+  panel.appendChild(cols);
   container.appendChild(panel);
 }
+
 
 // Full drawing-tools controller for one chart pane. cfg:
 //   getChart()        - returns the pane's current chart instance
@@ -1995,11 +2146,16 @@ function createDrawingPane(cfg) {
   }
 
   // Whether `d` (a shape or an hline) should be visible on THIS pane's
-  // currently active timeframe, per its own timeframes checkboxes
-  // (default all-true, so new drawings show everywhere until the user
-  // unchecks something in the Style panel).
+  // currently active timeframe. Both the absolute "Show on" column
+  // (per-timeframe checkboxes, default all-true) AND the "Relative to
+  // home" column (offset from the timeframe it was created on, default
+  // all-true) must allow it - either one restricting is enough to hide
+  // it, matching the AND behavior requested for these two columns.
   function isVisibleForCurrentTF(d) {
-    return !d.timeframes || d.timeframes[cfg.getCurrentTFKey()] !== false;
+    const tfKey = cfg.getCurrentTFKey();
+    const absoluteOk = !d.timeframes || d.timeframes[tfKey] !== false;
+    const relativeOk = matchesRelativeTF(d, tfKey);
+    return absoluteOk && relativeOk;
   }
 
   // Re-applies a drawing's visibility for whichever timeframe is
@@ -2044,6 +2200,8 @@ function createDrawingPane(cfg) {
       type, time1, price1, time2, price2, color, source,
       opacity: 1, lineWidth: 2, lineStyle: 'solid',
       timeframes: defaultTimeframes(),
+      relativeTF: defaultRelativeTF(),
+      homeTF: cfg.getCurrentTFKey(),
     };
     renderDrawing(drawing);
     userDrawings.push(drawing);
@@ -2056,13 +2214,16 @@ function createDrawingPane(cfg) {
     lineStyle = lineStyle || 'solid';
     const colorHex = colorMap[colorName] || '#2962ff';
     const timeframes = defaultTimeframes();
-    const visible = isVisibleForCurrentTF({ timeframes });
+    const relativeTF = defaultRelativeTF();
+    const homeTF = cfg.getCurrentTFKey();
+    const visible = isVisibleForCurrentTF({ timeframes, relativeTF, homeTF });
     const handle = cfg.getSeries().createPriceLine({
       price, color: colorHex, lineWidth, lineStyle: LINE_STYLE_MAP[lineStyle],
       axisLabelVisible: visible, lineVisible: visible, title: label || '',
     });
     const pl = {
-      price, color: colorName || 'blue', colorHex, opacity: 1, lineWidth, lineStyle, timeframes,
+      price, color: colorName || 'blue', colorHex, opacity: 1, lineWidth, lineStyle,
+      timeframes, relativeTF, homeTF,
       label: label || '', lwcHandle: handle, source,
     };
     priceLines.push(pl);

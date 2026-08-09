@@ -738,7 +738,7 @@
       <div id="earnings-overlay"></div>
       <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">42</div>
+      <div id="build-number">43</div>
       <div id="main-no-data">No Data</div>
     </div>
     <div id="rsi-chart-container">
@@ -1569,6 +1569,25 @@ const LINE_STYLE_MAP = {
 // the point that defines the ray's slope - not at the rendered far edge,
 // since the edge is just a derived extension and dragging it directly
 // wouldn't map back to a meaningful stored value.
+// Like getShapePoints, but always returns the shape's REAL, directly-
+// stored points rather than any auto-extrapolated edge. Used only to
+// position selection UI (the move handle, Style/Delete toolbar) - a
+// steep Ray's extrapolated edge can land at a price way outside the
+// visible chart even though the ray itself correctly draws out to it,
+// which was putting those controls far off in empty space ("a strange
+// dot above the line"). The user's actual two clicks are always
+// somewhere near the visible chart, so anchoring UI to those instead
+// keeps it sane regardless of how steep/far the ray extends.
+function getAnchorPoints(drawing) {
+  if (drawing.type === 'hray') {
+    return [{ time: drawing.time1, value: drawing.price1 }, { time: drawing.time1, value: drawing.price1 }];
+  }
+  return [
+    { time: drawing.time1, value: drawing.price1 },
+    { time: drawing.time2, value: drawing.price2 },
+  ].sort((a, b) => timeToNumeric(a.time) - timeToNumeric(b.time));
+}
+
 function getShapePoints(drawing) {
   let p1, p2;
   if (drawing.type === 'trendline') {
@@ -1679,11 +1698,22 @@ document.querySelectorAll('.draw-tool-btn').forEach(btn => {
 });
 
 // Cancel an in-progress draw or clear a selection without hunting for
-// the cursor button.
+// the cursor button. Delete/Backspace removes the selected drawing -
+// guarded against firing while focus is in a text field (the paste
+// modal, or an input inside the style panel) so it doesn't eat normal
+// typing/editing there.
 document.addEventListener('keydown', (e) => {
-  if (e.key !== 'Escape') return;
-  if (activeDrawTool !== 'none') setActiveDrawTool('none');
-  else if (selectedDrawing) selectDrawing(null);
+  if (e.key === 'Escape') {
+    if (activeDrawTool !== 'none') setActiveDrawTool('none');
+    else if (selectedDrawing) selectDrawing(null);
+    return;
+  }
+  if ((e.key === 'Delete' || e.key === 'Backspace') && selectedDrawing) {
+    const tag = document.activeElement && document.activeElement.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+    e.preventDefault();
+    deleteSelectedDrawing();
+  }
 });
 
 // Throttles preview-line updates to once per animation frame. Calling
@@ -2077,7 +2107,7 @@ function renderSelectionOverlay() {
       }
     }
 
-    const [rp1, rp2] = getShapePoints(d);
+    const [rp1, rp2] = getAnchorPoints(d);
     const mx1 = chart.timeScale().timeToCoordinate(rp1.time);
     const my1 = series.priceToCoordinate(rp1.value);
     const mx2 = chart.timeScale().timeToCoordinate(rp2.time);
@@ -2088,12 +2118,17 @@ function renderSelectionOverlay() {
       // than reshaping it from one end. Wired directly (not through
       // makeHandle's onMove-per-mousemove pattern) since the drag needs
       // the original mousedown event to compute a starting offset.
-      const moveHandle = document.createElement('div');
-      moveHandle.className = 'drawing-handle drawing-handle-move';
-      moveHandle.style.left = midX + 'px';
-      moveHandle.style.top = midY + 'px';
-      moveHandle.addEventListener('mousedown', (evt) => startTranslateDrag(d, evt));
-      container.appendChild(moveHandle);
+      // Horizontal Ray only has one real point, so its own anchor
+      // handle above already does this job - skip the redundant
+      // overlapping handle here.
+      if (d.type !== 'hray') {
+        const moveHandle = document.createElement('div');
+        moveHandle.className = 'drawing-handle drawing-handle-move';
+        moveHandle.style.left = midX + 'px';
+        moveHandle.style.top = midY + 'px';
+        moveHandle.addEventListener('mousedown', (evt) => startTranslateDrag(d, evt));
+        container.appendChild(moveHandle);
+      }
 
       renderActionBar(container, midX, Math.min(my1, my2) - 4, d, 'shape');
     }
@@ -2130,11 +2165,11 @@ chart.subscribeClick(param => {
 
   if (activeDrawTool === 'hline') {
     const handle = series.createPriceLine({
-      price, color: '#2962ff', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed,
+      price, color: '#2962ff', lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Solid,
       axisLabelVisible: true, title: '',
     });
     priceLines.push({
-      price, color: 'blue', colorHex: '#2962ff', opacity: 1, lineWidth: 1, lineStyle: 'dashed',
+      price, color: 'blue', colorHex: '#2962ff', opacity: 1, lineWidth: 2, lineStyle: 'solid',
       label: '', lwcHandle: handle, source: 'user',
     });
     updateOutputBox();

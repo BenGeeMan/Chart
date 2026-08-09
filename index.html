@@ -140,29 +140,26 @@
     flex: 1;
     min-height: 0;
   }
+  #header-separator {
+    width: 1px;
+    align-self: stretch;
+    margin: 8px 0;
+    background: var(--panel-border);
+  }
   #draw-toolbar {
-    position: absolute;
-    top: 50%;
-    left: 0;
-    transform: translateY(-50%);
-    z-index: 6;
     display: flex;
-    flex-direction: column;
-    background: #ffffff;
-    border: 1px solid var(--panel-border);
-    border-left: none;
-    border-radius: 0 6px 6px 0;
+    gap: 2px;
   }
   .draw-tool-btn {
+    flex: none;
     background: transparent;
     border: none;
-    border-bottom: 1px solid var(--panel-border);
-    padding: 8px 9px;
-    font-size: 14px;
+    border-radius: 4px;
+    padding: 6px 10px;
+    font-size: 13px;
     color: var(--text-dim);
     cursor: pointer;
   }
-  .draw-tool-btn:last-child { border-bottom: none; }
   .draw-tool-btn:hover { background: rgba(0,0,0,0.04); color: var(--text); }
   .draw-tool-btn.active { background: rgba(41,98,255,0.12); color: var(--accent); }
   #rsi-chart-container {
@@ -188,6 +185,27 @@
     color: var(--text);
     pointer-events: none;
     user-select: none;
+  }
+  #rsi-settings-btn {
+    position: absolute;
+    top: 2px;
+    right: 8px;
+    z-index: 6;
+    background: transparent;
+    border: none;
+    font-size: 13px;
+    color: var(--text-dim);
+    cursor: pointer;
+    padding: 2px 4px;
+    line-height: 1;
+  }
+  #rsi-settings-btn:hover { color: var(--text); }
+  #rsi-settings-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 7;
+    pointer-events: none;
+    overflow: visible;
   }
   #rsi-tf-buttons {
     position: absolute;
@@ -609,6 +627,40 @@
     cursor: pointer;
   }
   .panel-actions-row button:hover { background: rgba(0,0,0,0.06); }
+  .rsi-settings-panel { width: 190px; }
+  .rsi-settings-section {
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    margin: 10px 0 4px;
+  }
+  .rsi-settings-section:first-child { margin-top: 0; }
+  .rsi-level-controls {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 1;
+    justify-content: flex-end;
+  }
+  .rsi-level-controls input[type=checkbox] {
+    margin: 0;
+    width: 12px;
+    height: 12px;
+    cursor: pointer;
+  }
+  .rsi-level-controls input[type=number] {
+    width: 44px;
+    font-size: 11px;
+    padding: 2px 4px;
+    border: 1px solid var(--panel-border);
+    border-radius: 3px;
+  }
+  .rsi-level-controls input[type=number]:disabled {
+    color: var(--text-dim);
+    background: rgba(0,0,0,0.03);
+  }
 
   #sidebar {
     background: var(--panel);
@@ -707,6 +759,14 @@
       <button class="tf-btn" data-tf="monthly">M</button>
       <button class="tf-btn" data-tf="quarterly">Q</button>
     </div>
+    <div id="header-separator"></div>
+    <div id="draw-toolbar">
+      <button class="draw-tool-btn active" data-tool="none" title="Cursor (select/pan)">⊙</button>
+      <button class="draw-tool-btn" data-tool="trendline" title="Trend Line">╱</button>
+      <button class="draw-tool-btn" data-tool="hline" title="Horizontal Line">—</button>
+      <button class="draw-tool-btn" data-tool="ray" title="Ray">↗</button>
+      <button class="draw-tool-btn" data-tool="hray" title="Horizontal Ray">⇥</button>
+    </div>
     <div class="header-icon-buttons">
       <button id="clear-btn" class="icon-btn" title="Clear all drawings">🗑</button>
       <button id="copy-text-btn" class="icon-btn" title="Copy chart state text">🗒</button>
@@ -738,13 +798,6 @@
 
   <div id="chart-pane">
     <div id="main-chart-area">
-      <div id="draw-toolbar">
-        <button class="draw-tool-btn active" data-tool="none" title="Cursor (select/pan)">⊙</button>
-        <button class="draw-tool-btn" data-tool="trendline" title="Trend Line">╱</button>
-        <button class="draw-tool-btn" data-tool="hline" title="Horizontal Line">—</button>
-        <button class="draw-tool-btn" data-tool="ray" title="Ray">↗</button>
-        <button class="draw-tool-btn" data-tool="hray" title="Horizontal Ray">⇥</button>
-      </div>
       <div id="legend">
         <div class="headline" id="legend-headline">HPQ · Daily · NYSE</div>
         <button id="indicators-toggle" type="button">Indicators <span id="indicators-chevron">▾</span></button>
@@ -802,11 +855,13 @@
       <div id="earnings-overlay"></div>
       <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">57</div>
+      <div id="build-number">59</div>
       <div id="main-no-data">No Data</div>
     </div>
     <div id="rsi-chart-container">
       <div id="rsi-label">RSI (14)</div>
+      <button id="rsi-settings-btn" title="RSI settings">⚙</button>
+      <div id="rsi-settings-overlay"></div>
       <div id="rsi-tf-buttons">
         <button class="rsi-tf-btn" data-tf="m5">5m</button>
         <button class="rsi-tf-btn" data-tf="m15">15m</button>
@@ -1070,6 +1125,95 @@ let rsiSeries = null;
 let syncingFromMain = false, syncingFromRsi = false;
 let rsiTF = 'daily'; // RSI's own timeframe - independent of the main chart's
 
+// --- RSI's own settings: the RSI line's color/thickness/line-type, and
+// three optional reference lines (Upper/Lower/Middle), each with its
+// own on/off + threshold value, sharing one color/thickness/line-type
+// between the three of them (matches how these are usually styled as
+// a single visual group on real trading platforms, rather than three
+// independently-colored lines). Persisted separately from the drawing-
+// tools' own per-tool defaults (see TOOL_DEFAULTS_STORAGE_KEY above) -
+// this is about the RSI INDICATOR itself, not anything drawn on it.
+const RSI_SETTINGS_STORAGE_KEY = 'rsiSettings_v1';
+const RSI_SETTINGS_FACTORY_DEFAULT = {
+  line: { color: '#131722', lineWidth: 1, lineStyle: 'solid' },
+  refLine: { color: '#9a9ea6', lineWidth: 2, lineStyle: 'dashed' },
+  upper: { enabled: true, value: 60 },
+  lower: { enabled: true, value: 40 },
+  middle: { enabled: false, value: 50 },
+};
+
+function loadRsiSettings() {
+  try {
+    const raw = localStorage.getItem(RSI_SETTINGS_STORAGE_KEY);
+    const saved = raw ? JSON.parse(raw) : null;
+    // Deep-merge over the factory default so a partially-saved/older
+    // settings object (e.g. from before "middle" existed) still gets
+    // sensible values for anything it's missing.
+    return {
+      line: Object.assign({}, RSI_SETTINGS_FACTORY_DEFAULT.line, saved && saved.line),
+      refLine: Object.assign({}, RSI_SETTINGS_FACTORY_DEFAULT.refLine, saved && saved.refLine),
+      upper: Object.assign({}, RSI_SETTINGS_FACTORY_DEFAULT.upper, saved && saved.upper),
+      lower: Object.assign({}, RSI_SETTINGS_FACTORY_DEFAULT.lower, saved && saved.lower),
+      middle: Object.assign({}, RSI_SETTINGS_FACTORY_DEFAULT.middle, saved && saved.middle),
+    };
+  } catch (e) {
+    return JSON.parse(JSON.stringify(RSI_SETTINGS_FACTORY_DEFAULT));
+  }
+}
+
+let rsiSettings = loadRsiSettings();
+
+function persistRsiSettings() {
+  try {
+    localStorage.setItem(RSI_SETTINGS_STORAGE_KEY, JSON.stringify(rsiSettings));
+  } catch (e) {
+    // Best-effort, same as the drawing-tools defaults - fails silently
+    // if storage is unavailable, still works for this session.
+  }
+}
+
+let rsiUpperHandle = null, rsiLowerHandle = null, rsiMiddleHandle = null;
+
+// (Re)applies rsiSettings to the current rsiSeries - the line's own
+// style, and each reference line (removing/recreating it, since
+// LightweightCharts price lines don't support toggling visibility
+// directly - see the same pattern used for hline drawings elsewhere in
+// this file). Called once when RSI's chart is (re)created, and again
+// any time a setting changes in the panel.
+function applyRsiSettings() {
+  if (!rsiSeries) return;
+  rsiSeries.applyOptions({
+    color: rsiSettings.line.color,
+    lineWidth: rsiSettings.line.lineWidth,
+    lineStyle: LINE_STYLE_MAP[rsiSettings.line.lineStyle],
+  });
+
+  if (rsiUpperHandle) { rsiSeries.removePriceLine(rsiUpperHandle); rsiUpperHandle = null; }
+  if (rsiSettings.upper.enabled) {
+    rsiUpperHandle = rsiSeries.createPriceLine({
+      price: rsiSettings.upper.value, color: rsiSettings.refLine.color,
+      lineWidth: rsiSettings.refLine.lineWidth, lineStyle: LINE_STYLE_MAP[rsiSettings.refLine.lineStyle],
+      axisLabelVisible: true, title: '',
+    });
+  }
+  if (rsiLowerHandle) { rsiSeries.removePriceLine(rsiLowerHandle); rsiLowerHandle = null; }
+  if (rsiSettings.lower.enabled) {
+    rsiLowerHandle = rsiSeries.createPriceLine({
+      price: rsiSettings.lower.value, color: rsiSettings.refLine.color,
+      lineWidth: rsiSettings.refLine.lineWidth, lineStyle: LINE_STYLE_MAP[rsiSettings.refLine.lineStyle],
+      axisLabelVisible: true, title: '',
+    });
+  }
+  if (rsiMiddleHandle) { rsiSeries.removePriceLine(rsiMiddleHandle); rsiMiddleHandle = null; }
+  if (rsiSettings.middle.enabled) {
+    rsiMiddleHandle = rsiSeries.createPriceLine({
+      price: rsiSettings.middle.value, color: rsiSettings.refLine.color,
+      lineWidth: rsiSettings.refLine.lineWidth, lineStyle: LINE_STYLE_MAP[rsiSettings.refLine.lineStyle],
+      axisLabelVisible: true, title: '',
+    });
+  }
+}
+
 function createRsiChart() {
   rsiChartEl.innerHTML = ''; // clean slate in case a previous instance left anything behind
   rsiChart = LightweightCharts.createChart(rsiChartEl, {
@@ -1089,14 +1233,12 @@ function createRsiChart() {
     height: rsiChartEl.clientHeight,
   });
   rsiSeries = rsiChart.addLineSeries({
-    color: '#131722',
-    lineWidth: 1,
     priceLineVisible: false,
     lastValueVisible: false,
     autoscaleInfoProvider: () => ({ priceRange: { minValue: 0, maxValue: 100 } }),
   });
-  rsiSeries.createPriceLine({ price: 60, color: '#9a9ea6', lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dashed, axisLabelVisible: true, title: '' });
-  rsiSeries.createPriceLine({ price: 40, color: '#9a9ea6', lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dashed, axisLabelVisible: true, title: '' });
+  rsiUpperHandle = null; rsiLowerHandle = null; rsiMiddleHandle = null;
+  applyRsiSettings();
 
   rsiChart.timeScale().subscribeVisibleLogicalRangeChange(range => {
     // Only push pan/zoom back to the main chart when both are showing
@@ -1687,6 +1829,164 @@ document.querySelectorAll('#legend .ind-row[data-rel-ema]').forEach(row => {
 // the freed space, then resizes both chart instances to match.
 let rsiEnabled = true;
 
+let rsiSettingsPanelOpen = false;
+
+// Renders the RSI settings panel (⚙ button near the "RSI (14)" label).
+// Changes apply LIVE to the current RSI display immediately (so you see
+// the effect right away), but do NOT persist as "the default" for the
+// next page load until "Set as Default" is explicitly clicked - same
+// two-step pattern as the drawing tools' own Style/Timeframe panels
+// (live preview vs. saved default are two different things).
+function renderRsiSettingsPanel() {
+  const container = document.getElementById('rsi-settings-overlay');
+  if (!container) return;
+  container.innerHTML = '';
+  if (!rsiSettingsPanelOpen) return;
+
+  const panel = document.createElement('div');
+  panel.className = 'drawing-settings-panel rsi-settings-panel';
+  panel.style.top = '22px';
+  panel.style.right = '8px';
+  panel.addEventListener('mousedown', (e) => e.stopPropagation());
+  panel.addEventListener('click', (e) => e.stopPropagation());
+
+  function addRow(labelText, inputEl) {
+    const row = document.createElement('div');
+    row.className = 'row';
+    const label = document.createElement('label');
+    label.textContent = labelText;
+    row.appendChild(label);
+    row.appendChild(inputEl);
+    panel.appendChild(row);
+  }
+
+  function addSectionHeader(text) {
+    const h = document.createElement('div');
+    h.className = 'rsi-settings-section';
+    h.textContent = text;
+    panel.appendChild(h);
+  }
+
+  function applyLive() {
+    applyRsiSettings();
+  }
+
+  function makeStyleRows(styleObj) {
+    const colorInput = document.createElement('input');
+    colorInput.type = 'color';
+    colorInput.value = styleObj.color;
+    colorInput.addEventListener('input', () => { styleObj.color = colorInput.value; applyLive(); });
+    addRow('Color', colorInput);
+
+    const widthSelect = document.createElement('select');
+    [1, 2, 3, 4].forEach((v) => {
+      const opt = document.createElement('option');
+      opt.value = String(v); opt.textContent = v + 'px';
+      if (v === styleObj.lineWidth) opt.selected = true;
+      widthSelect.appendChild(opt);
+    });
+    widthSelect.addEventListener('change', () => { styleObj.lineWidth = parseInt(widthSelect.value, 10); applyLive(); });
+    addRow('Thickness', widthSelect);
+
+    const styleSelect = document.createElement('select');
+    [['solid', 'Solid'], ['dashed', 'Dashed'], ['dotted', 'Dotted']].forEach(([v, label]) => {
+      const opt = document.createElement('option');
+      opt.value = v; opt.textContent = label;
+      if (v === styleObj.lineStyle) opt.selected = true;
+      styleSelect.appendChild(opt);
+    });
+    styleSelect.addEventListener('change', () => { styleObj.lineStyle = styleSelect.value; applyLive(); });
+    addRow('Line', styleSelect);
+  }
+
+  addSectionHeader('RSI Line');
+  makeStyleRows(rsiSettings.line);
+
+  addSectionHeader('Reference Lines');
+  makeStyleRows(rsiSettings.refLine);
+
+  addSectionHeader('Levels');
+  function addLevelRow(key, labelText) {
+    const row = document.createElement('div');
+    row.className = 'row';
+    const label = document.createElement('label');
+    label.textContent = labelText;
+    row.appendChild(label);
+
+    const wrap = document.createElement('div');
+    wrap.className = 'rsi-level-controls';
+
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = rsiSettings[key].enabled;
+
+    const valueInput = document.createElement('input');
+    valueInput.type = 'number';
+    valueInput.min = '0'; valueInput.max = '100'; valueInput.step = '1';
+    valueInput.value = rsiSettings[key].value;
+    valueInput.disabled = !cb.checked;
+
+    cb.addEventListener('mousedown', (e) => e.stopPropagation());
+    cb.addEventListener('change', () => {
+      rsiSettings[key].enabled = cb.checked;
+      valueInput.disabled = !cb.checked;
+      applyLive();
+    });
+    valueInput.addEventListener('mousedown', (e) => e.stopPropagation());
+    valueInput.addEventListener('change', () => {
+      const v = parseFloat(valueInput.value);
+      if (!isNaN(v)) rsiSettings[key].value = v;
+      applyLive();
+    });
+
+    wrap.appendChild(cb);
+    wrap.appendChild(valueInput);
+    row.appendChild(wrap);
+    panel.appendChild(row);
+  }
+  addLevelRow('upper', 'Upper');
+  addLevelRow('lower', 'Lower');
+  addLevelRow('middle', 'Middle');
+
+  const actionsRow = document.createElement('div');
+  actionsRow.className = 'panel-actions-row';
+
+  const setDefaultBtn = document.createElement('button');
+  setDefaultBtn.textContent = 'Set as Default';
+  setDefaultBtn.addEventListener('mousedown', (e) => e.stopPropagation());
+  setDefaultBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    persistRsiSettings();
+    setStatus('Saved as the default RSI settings.', false);
+  });
+  actionsRow.appendChild(setDefaultBtn);
+
+  const restoreDefaultBtn = document.createElement('button');
+  restoreDefaultBtn.textContent = 'Restore Default';
+  restoreDefaultBtn.addEventListener('mousedown', (e) => e.stopPropagation());
+  restoreDefaultBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    // Reloads whatever's currently SAVED (or the factory default, if
+    // nothing's ever been saved) - discards any live-but-unsaved tweaks.
+    rsiSettings = loadRsiSettings();
+    applyRsiSettings();
+    renderRsiSettingsPanel();
+  });
+  actionsRow.appendChild(restoreDefaultBtn);
+  panel.appendChild(actionsRow);
+
+  container.appendChild(panel);
+}
+
+document.getElementById('rsi-settings-btn').addEventListener('click', (e) => {
+  e.stopPropagation();
+  rsiSettingsPanelOpen = !rsiSettingsPanelOpen;
+  renderRsiSettingsPanel();
+});
+document.addEventListener('click', () => {
+  if (rsiSettingsPanelOpen) { rsiSettingsPanelOpen = false; renderRsiSettingsPanel(); }
+});
+
 function setRsiEnabled(enabled) {
   rsiEnabled = enabled;
   document.getElementById('rsi-chart-container').classList.toggle('hidden', !enabled);
@@ -2272,7 +2572,6 @@ function renderTimeframePanel(container, x, y, target, kind, onVisibilityChange,
       relativeTF: Object.assign({}, target.relativeTF),
       relativeTFColumnEnabled: target.relativeTFColumnEnabled,
     });
-    setStatus('Saved as the default timeframe settings for this tool.', false);
   });
   actionsRow.appendChild(setDefaultBtn);
 

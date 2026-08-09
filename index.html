@@ -767,7 +767,7 @@
       <div id="earnings-overlay"></div>
       <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">50</div>
+      <div id="build-number">51</div>
       <div id="main-no-data">No Data</div>
     </div>
     <div id="rsi-chart-container">
@@ -1647,6 +1647,16 @@ const LINE_STYLE_MAP = {
 // NEAREST actual loaded bar rather than raw midnight UTC, so
 // findBarIndex() still finds a real bar to work with rather than
 // landing between two bars.
+//
+// Returns null if the date falls entirely outside the currently loaded
+// intraday window - intraday data typically covers far less history
+// than daily+, so a long-range drawing's dates are very often outside
+// it. Snapping to the nearest edge bar regardless (the original
+// approach) meant two far-apart dates could BOTH collapse onto the
+// SAME edge bar, turning what should be a long diagonal line into a
+// near-vertical one. Callers treat null as "not representable on this
+// pane's current timeframe" and skip rendering that point/shape rather
+// than drawing something misleading.
 function resolveDrawingTime(time, bars) {
   if (!bars.length) return time;
   const targetIsIntraday = typeof bars[0].time === 'number';
@@ -1654,6 +1664,9 @@ function resolveDrawingTime(time, bars) {
   if (targetIsIntraday === sourceIsIntraday) return time;
   if (targetIsIntraday) {
     const targetTs = dateStringToTimestamp(time);
+    const firstBar = bars[0].time, lastBar = bars[bars.length - 1].time;
+    const oneDay = 24 * 3600;
+    if (targetTs < firstBar - oneDay || targetTs > lastBar + oneDay) return null;
     let best = bars[0], bestDiff = Math.abs(bars[0].time - targetTs);
     for (const b of bars) {
       const diff = Math.abs(b.time - targetTs);
@@ -1675,12 +1688,15 @@ function resolveDrawingTime(time, bars) {
 function getShapePoints(drawing, bars, isLog) {
   let p1, p2;
   const t1 = resolveDrawingTime(drawing.time1, bars);
+  if (t1 === null) return null;
   if (drawing.type === 'trendline') {
     const t2 = resolveDrawingTime(drawing.time2, bars);
+    if (t2 === null) return null;
     p1 = { time: t1, value: drawing.price1 };
     p2 = { time: t2, value: drawing.price2 };
   } else if (drawing.type === 'ray') {
     const t2 = resolveDrawingTime(drawing.time2, bars);
+    if (t2 === null) return null;
     const goingRight = timeToNumeric(t2) >= timeToNumeric(t1);
     const edgeTime = bars.length ? (goingRight ? bars[bars.length - 1].time : bars[0].time) : t2;
     const edgePrice = extrapolatePrice(t1, drawing.price1, t2, drawing.price2, edgeTime, isLog);
@@ -1703,13 +1719,17 @@ function getShapePoints(drawing, bars, isLog) {
 // actual two clicks are always somewhere near the visible chart, so
 // anchoring UI to those instead keeps it sane regardless of how
 // steep/far the ray extends. `bars` is used the same way as in
-// getShapePoints, to resolve stored times into the current format.
+// getShapePoints, to resolve stored times into the current format -
+// also returns null if either point can't be resolved here, same as
+// getShapePoints.
 function getAnchorPoints(drawing, bars) {
   const t1 = resolveDrawingTime(drawing.time1, bars);
+  if (t1 === null) return null;
   if (drawing.type === 'hray') {
     return [{ time: t1, value: drawing.price1 }, { time: t1, value: drawing.price1 }];
   }
   const t2 = resolveDrawingTime(drawing.time2, bars);
+  if (t2 === null) return null;
   return [
     { time: t1, value: drawing.price1 },
     { time: t2, value: drawing.price2 },
@@ -1868,11 +1888,28 @@ function renderStylePanel(container, x, y, target, kind, onVisibilityChange) {
   });
   addRow('Line', sSelect);
 
-  // Which timeframes this drawing shows on - defaults to all checked.
+  container.appendChild(panel);
+}
+
+// Separate small panel just for the "which timeframes does this
+// drawing show on" checkboxes - split out from the Style panel above
+// so it's its own menu rather than one more row buried in there.
+// `onVisibilityChange` re-applies the drawing's visible/lineVisible
+// state for whichever timeframe is currently active, since toggling a
+// DIFFERENT timeframe's box shouldn't change what's shown right now.
+function renderTimeframePanel(container, x, y, target, onVisibilityChange) {
+  const panel = document.createElement('div');
+  panel.className = 'drawing-settings-panel';
+  panel.style.left = x + 'px';
+  panel.style.top = y + 'px';
+  panel.addEventListener('mousedown', (e) => e.stopPropagation());
+  panel.addEventListener('click', (e) => e.stopPropagation());
+
   // A drawing made before this feature existed won't have `timeframes`
   // set at all; treat that the same as all-checked rather than leaving
   // it invisible everywhere.
   if (!target.timeframes) target.timeframes = defaultTimeframes();
+
   const tfGrid = document.createElement('div');
   tfGrid.className = 'tf-checkbox-grid';
   Object.keys(TIMEFRAME_META).forEach((tfKey) => {
@@ -1891,7 +1928,7 @@ function renderStylePanel(container, x, y, target, kind, onVisibilityChange) {
     tfLabel.appendChild(document.createTextNode(TIMEFRAME_META[tfKey].short));
     tfGrid.appendChild(tfLabel);
   });
-  addRow('Show on', tfGrid);
+  panel.appendChild(tfGrid);
 
   container.appendChild(panel);
 }
@@ -1943,6 +1980,7 @@ function createDrawingPane(cfg) {
   let previewRafData = null;
   let selectedDrawing = null;
   let settingsPanelOpen = false;
+  let timeframePanelOpen = false;
   const userDrawings = [];
   const priceLines = [];
 
@@ -1977,6 +2015,14 @@ function createDrawingPane(cfg) {
   }
 
   function renderDrawing(drawing) {
+    const points = getShapePoints(drawing, cfg.getBars(), cfg.isLog);
+    if (!points) {
+      // Not representable on this pane's current timeframe (its dates
+      // fall entirely outside the loaded bars - see resolveDrawingTime)
+      // - don't create a series with corrupted data, just skip it.
+      drawing.series = null;
+      return;
+    }
     const lineSeries = cfg.getChart().addLineSeries({
       color: colorWithOpacity(drawing.color, drawing.opacity != null ? drawing.opacity : 1),
       lineWidth: drawing.lineWidth || 2,
@@ -1989,7 +2035,7 @@ function createDrawingPane(cfg) {
       // "Maximum call stack size exceeded" crash.
       autoscaleInfoProvider: () => null,
     });
-    lineSeries.setData(getShapePoints(drawing, cfg.getBars(), cfg.isLog));
+    lineSeries.setData(points);
     drawing.series = lineSeries;
   }
 
@@ -2046,6 +2092,7 @@ function createDrawingPane(cfg) {
   function selectDrawing(sel) {
     selectedDrawing = sel;
     settingsPanelOpen = false;
+    timeframePanelOpen = false;
     renderSelectionOverlay();
   }
 
@@ -2133,6 +2180,7 @@ function createDrawingPane(cfg) {
     }
     selectedDrawing = null;
     settingsPanelOpen = false;
+    timeframePanelOpen = false;
     const el = document.getElementById(cfg.overlayId);
     if (el) el.innerHTML = '';
     updateOutputBox();
@@ -2143,7 +2191,9 @@ function createDrawingPane(cfg) {
     const chart = cfg.getChart(), series = cfg.getSeries(), bars = cfg.getBars();
     const HIT = 6;
     for (const d of userDrawings) {
-      const [p1, p2] = getShapePoints(d, bars, cfg.isLog);
+      const pts = getShapePoints(d, bars, cfg.isLog);
+      if (!pts) continue;
+      const [p1, p2] = pts;
       const x1 = chart.timeScale().timeToCoordinate(p1.time);
       const y1 = series.priceToCoordinate(p1.value);
       const x2 = chart.timeScale().timeToCoordinate(p2.time);
@@ -2173,9 +2223,21 @@ function createDrawingPane(cfg) {
     settingsBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       settingsPanelOpen = !settingsPanelOpen;
+      if (settingsPanelOpen) timeframePanelOpen = false;
       renderSelectionOverlay();
     });
     bar.appendChild(settingsBtn);
+
+    const tfBtn = document.createElement('button');
+    tfBtn.textContent = '🕐 Timeframe';
+    tfBtn.addEventListener('mousedown', (e) => e.stopPropagation());
+    tfBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      timeframePanelOpen = !timeframePanelOpen;
+      if (timeframePanelOpen) settingsPanelOpen = false;
+      renderSelectionOverlay();
+    });
+    bar.appendChild(tfBtn);
 
     const delBtn = document.createElement('button');
     delBtn.textContent = '🗑 Delete';
@@ -2186,6 +2248,7 @@ function createDrawingPane(cfg) {
     container.appendChild(bar);
 
     if (settingsPanelOpen) renderStylePanel(container, x, y + 34, target, kind, () => applyVisibility(target, kind));
+    if (timeframePanelOpen) renderTimeframePanel(container, x, y + 34, target, () => applyVisibility(target, kind));
   }
 
   // Renders the selection handles (draggable circles at each editable
@@ -2242,7 +2305,7 @@ function createDrawingPane(cfg) {
     if (selectedDrawing.kind === 'shape') {
       const d = selectedDrawing.ref;
       const resolvedTime1 = resolveDrawingTime(d.time1, bars);
-      const x1 = chart.timeScale().timeToCoordinate(resolvedTime1);
+      const x1 = resolvedTime1 === null ? null : chart.timeScale().timeToCoordinate(resolvedTime1);
       const y1 = series.priceToCoordinate(d.price1);
       makeHandle(x1, y1, (ev) => {
         const { x, y } = screenToChartXY(ev);
@@ -2264,7 +2327,7 @@ function createDrawingPane(cfg) {
 
       if (d.type === 'trendline' || d.type === 'ray') {
         const resolvedTime2 = resolveDrawingTime(d.time2, bars);
-        const x2 = chart.timeScale().timeToCoordinate(resolvedTime2);
+        const x2 = resolvedTime2 === null ? null : chart.timeScale().timeToCoordinate(resolvedTime2);
         const y2 = series.priceToCoordinate(d.price2);
         makeHandle(x2, y2, (ev) => {
           const { x, y } = screenToChartXY(ev);
@@ -2278,28 +2341,31 @@ function createDrawingPane(cfg) {
         });
       }
 
-      const [rp1, rp2] = getAnchorPoints(d, bars);
-      const mx1 = chart.timeScale().timeToCoordinate(rp1.time);
-      const my1 = series.priceToCoordinate(rp1.value);
-      const mx2 = chart.timeScale().timeToCoordinate(rp2.time);
-      const my2 = series.priceToCoordinate(rp2.value);
-      if (mx1 !== null && my1 !== null && mx2 !== null && my2 !== null) {
-        const midX = (mx1 + mx2) / 2, midY = (my1 + my2) / 2;
-        if (inBounds(midX, midY)) {
-          // Horizontal Ray only has one real point, so its own anchor
-          // handle above already does this job - skip the redundant
-          // overlapping handle here.
-          if (d.type !== 'hray') {
-            const moveHandle = document.createElement('div');
-            moveHandle.className = 'drawing-handle drawing-handle-move';
-            moveHandle.style.left = midX + 'px';
-            moveHandle.style.top = midY + 'px';
-            moveHandle.addEventListener('mousedown', (evt) => startTranslateDrag(d, evt));
-            container.appendChild(moveHandle);
-          }
+      const anchorPts = getAnchorPoints(d, bars);
+      if (anchorPts) {
+        const [rp1, rp2] = anchorPts;
+        const mx1 = chart.timeScale().timeToCoordinate(rp1.time);
+        const my1 = series.priceToCoordinate(rp1.value);
+        const mx2 = chart.timeScale().timeToCoordinate(rp2.time);
+        const my2 = series.priceToCoordinate(rp2.value);
+        if (mx1 !== null && my1 !== null && mx2 !== null && my2 !== null) {
+          const midX = (mx1 + mx2) / 2, midY = (my1 + my2) / 2;
+          if (inBounds(midX, midY)) {
+            // Horizontal Ray only has one real point, so its own anchor
+            // handle above already does this job - skip the redundant
+            // overlapping handle here.
+            if (d.type !== 'hray') {
+              const moveHandle = document.createElement('div');
+              moveHandle.className = 'drawing-handle drawing-handle-move';
+              moveHandle.style.left = midX + 'px';
+              moveHandle.style.top = midY + 'px';
+              moveHandle.addEventListener('mousedown', (evt) => startTranslateDrag(d, evt));
+              container.appendChild(moveHandle);
+            }
 
-          const barY = Math.min(my1, my2) - 4;
-          if (inBounds(midX, barY)) renderActionBar(container, midX, barY, d, 'shape');
+            const barY = Math.min(my1, my2) - 4;
+            if (inBounds(midX, barY)) renderActionBar(container, midX, barY, d, 'shape');
+          }
         }
       }
     } else if (selectedDrawing.kind === 'hline') {
@@ -2450,6 +2516,7 @@ function createDrawingPane(cfg) {
     cancelPendingDraw();
     selectedDrawing = null;
     settingsPanelOpen = false;
+    timeframePanelOpen = false;
     userDrawings.length = 0;
     priceLines.length = 0;
     const el = document.getElementById(cfg.overlayId);

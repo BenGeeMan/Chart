@@ -27,54 +27,76 @@ anomalies.
 
 **If a change made during a conversation would make this document
 inaccurate, flag that to the user at the time** — a brief note is
-enough. Don't rewrite it automatically; the user prefers to batch
-documentation updates and will ask for the refreshed file when ready.
+enough. Don't rewrite it automatically; the user prefers to note
+documentation-worthy changes as they come up during a session, then do
+one full refresh at the end, rather than updating the doc after every
+small change.
 
 ---
 
 ## 0. NEXT SESSION PRIORITIES (read this first)
 
-Section 0, item 1 from the last handoff (debug the four drawing tools)
-is now **done** — see Section 6. What's left, in order:
+Everything from the previous handoff's Section 0 items 1-2 (annotation
+guide, baking it into image capture) is **still not started**. Item 3
+(real database) is **still not started but now better-scoped** — see
+the new Section 4 subsection. Items 4-5 (pipeline/watchlist expansion)
+are sibling-repo work, still not started. What's new or changed:
 
-1. **Write an "annotation guide" prompt** — a clean, well-written
-   reference covering the full text protocol (`MARKER`/`LINE`/
-   `TRENDLINE`/`RAY`/`HRAY`, the `RSI_` variants, and whatever gets
-   added below), aimed at teaching good annotation practice, not just
-   listing syntax.
-2. **Bake that guide directly into the "Copy image for Claude"
-   capture** (see Section 5) — so a future Claude session with no
-   memory of this one can read the protocol straight out of the image
-   itself. This is explicitly for easing future-session onboarding.
-3. **Connect the chart to a real database** instead of the current
-   static, manually-exported snapshot — the long-deferred item
-   described in Section 4.
-4. **Redo the scan/pipeline** (in the sibling `RichRoadStockScreenerUS`
-   repo) so it produces everything this chart project currently
-   calculates client-side — EMA 200, RSI(14), Volume EMA 3/20, and
-   ideally the multi-timeframe/relative EMA overlays too. See Section 4
-   for the full current client-side-vs-pipeline breakdown.
-5. **Expand/improve the watchlist** — likely connecting it to the full
-   daily scan output rather than the fixed 11 hand-picked stocks.
-6. **Add a "Technical Reference" section to both this document AND
-   `PROJECT_HANDOFF.md`** — the user asked whether current docs contain
-   enough for an AI to rebuild either project from scratch, possibly on
-   a different platform. Honest answer given: the *concept*, *history*,
-   and *gotchas* are well covered, but hard implementation detail isn't
-   — exact data schema/field names, exact color values, exact layout
-   proportions currently only exist in the actual code, not written
-   into the docs as a standalone reference. Needs fixing in both repos'
-   docs, not just this one.
-7. **Still not built:** Rectangle, Arrow, Text, Price Range, Date
+1. **User has now raised "rebuild this project on another platform"
+   twice** — once as a hypothetical (previous session, prompted the
+   old item 6 below) and once directly this session ("it may be
+   necessary in the future to rebuild the project on another
+   platform"). Treat this as a real possibility, not just a
+   documentation exercise. **Honest current state: the gap identified
+   last time has gotten WIDER, not narrower** — this session added
+   several new subsystems (RSI settings/layout persistence, per-tool
+   style/timeframe defaults, the future-placeholder-bars data model)
+   that live entirely in `index.html`'s code and browser localStorage,
+   with no standalone spec anywhere else. A rebuild-from-docs attempt
+   today would need to reverse-engineer all of it from source. If a
+   platform migration looks likely, the highest-leverage next step is
+   writing an actual **Technical Reference doc** (exact data schemas,
+   localStorage key formats, the whole timeframe-visibility model,
+   color/layout constants) BEFORE more features get added on top,
+   not after.
+2. **Persistent storage for annotations** (so drawings aren't lost
+   switching tickers) — discussed but deliberately deferred. User
+   floated a database on their own Google Drive; also compared against
+   using this GitHub repo itself as storage, and Firebase/Supabase.
+   Leaning toward GitHub-repo-as-storage given how comfortable the user
+   already is with this platform, but no decision made yet.
+3. **Any future indicator pane should get full feature parity with
+   RSI** — its own settings panel (style + on/off + value per
+   configurable line), its own independent multi-timeframe selector,
+   and the drawing tools attached to it. This is now a **standing
+   requirement**, not a one-off. The drawing-tools half of this is
+   already trivial (Section 7's `createDrawingPane` factory). The
+   settings-panel and layout (resize/reposition) halves are NOT yet
+   factored into a reusable pattern — RSI's version
+   (`RSI_SETTINGS_FACTORY_DEFAULT`, `applyRsiSettings`,
+   `renderRsiSettingsPanel`, `rsiLayout`/`applyRsiLayout`) is a good
+   template to copy, but a second indicator would currently mean
+   copy-pasting and renaming all of it, not reusing a shared factory.
+   Worth generalizing once a second indicator is actually needed.
+4. **Extend 5-minute data's historical depth.** 15-minute was extended
+   this session (31 days → 138 days, matching Hourly) but 5-minute
+   deliberately wasn't (see Section 4) — old drawings still won't
+   resolve on 5m if their date predates its ~9-14 day window. Revisit
+   if this becomes a live complaint rather than the earlier 15m one.
+5. **Text protocol still doesn't carry style** — a pasted `TRENDLINE`/
+   `LINE`/etc. still has no `opacity=`/`width=`/`style=` attribute.
+   **New nuance this session:** a pasted (Claude-authored) shape now
+   DOES inherit that tool's saved default opacity/thickness/line-type
+   (via the same mechanism new mouse-drawn shapes use) — only color
+   still comes from the pasted command's own `color=` attribute. This
+   was a deliberate choice (consistency between hand-drawn and pasted
+   shapes of the same tool) but means Claude can no longer assume a
+   pasted TRENDLINE is always solid/2px — it now depends on whatever
+   the user last saved as that tool's default.
+6. **Still not built:** Rectangle, Arrow, Text, Price Range, Date
    Range, Date and Price Range, Path tool, Highlighter, Eraser. See
    Section 6 for the full confirmed TradingView tool-name list.
-8. **Text protocol doesn't cover style yet** — a pasted `TRENDLINE`/
-   `LINE`/etc. command always creates a default-styled drawing (solid,
-   2px, full opacity). The color/opacity/thickness/line-type controls
-   added this session (Section 5/6) are mouse-only for now — extending
-   the protocol with optional `opacity=`/`width=`/`style=` attributes
-   is a natural next step if Claude needs to specify style precisely.
-9. **Only after 1-8 are solid**, move on to the actual end goal of this
+7. **Only after 1-6 are solid**, move on to the actual end goal of this
    whole project: teaching Claude the user's trading-decision logic
    through this visual tool, so it can eventually become real
    automated logic. This has not been started.
@@ -100,7 +122,7 @@ interact with a live web app:
    directly on the chart via the drawing toolbar (Section 6) — so both
    sides stay in sync in a format Claude can read.
 
-The eventual goal (see Section 0, item 9): the user explains trading
+The eventual goal (see Section 0, item 7): the user explains trading
 concepts/decision logic in plain English, Claude shows its
 understanding visually through this tool, and once agreed correct,
 that logic gets turned into permanent, automatable code.
@@ -111,10 +133,10 @@ that logic gets turned into permanent, automatable code.
 
 | File | Purpose |
 |---|---|
-| `index.html` | The entire app - a single self-contained HTML file. Must keep this exact filename; GitHub Pages requires it. Contains a visible build-number watermark (currently 47), manually incremented on every handoff, purely so the user can confirm a hard refresh actually picked up new code after repeated caching confusion during development. |
+| `index.html` | The entire app - a single self-contained HTML file. Must keep this exact filename; GitHub Pages requires it. Contains a visible build-number watermark (currently **68**), manually incremented on every handoff, purely so the user can confirm a hard refresh actually picked up new code after repeated caching confusion during development. |
 | `chart_watchlist.json` | Quote summary for the 11 watchlist stocks. |
-| `chart_earnings.json` | Earnings dates (past ~3 years + upcoming) per watchlist stock. |
-| `{ticker}_{timeframe}.json` | Price + indicator data per stock per timeframe (77 files: 11 stocks × 7 timeframes). |
+| `chart_earnings.json` | Earnings dates (past ~3 years + upcoming) per watchlist stock. Reconciled this session — see Section 4. |
+| `{ticker}_{timeframe}.json` | Price + indicator data per stock per timeframe (77 files: 11 stocks × 7 timeframes). All 77 now extend past "today" with future placeholder bars — see Section 4. 15m files are noticeably bigger than before (~650-680KB vs the others' ~250-350KB) due to the historical-depth extension. |
 | `.github/workflows/chart_export.yml` | Manual-trigger workflow that zips the repo for handoff to an AI assistant. |
 
 **Naming convention:** bias toward "chart" in new filenames. Exception:
@@ -125,7 +147,7 @@ needs a paid plan for private repos).
 
 ---
 
-## 3. The text protocol (as of build 47)
+## 3. The text protocol (as of build 68)
 
 ```
 MARKER date=YYYY-MM-DD pos=above|below shape=arrowUp|arrowDown|circle color=green|red|blue text="label"
@@ -138,9 +160,7 @@ HRAY time=YYYY-MM-DD price=NUMBER color=green|red|blue
 Every command except `MARKER` also has an **`RSI_` prefixed twin**
 (`RSI_LINE`, `RSI_TRENDLINE`, `RSI_RAY`, `RSI_HRAY`) that targets the
 RSI panel instead of the main chart — same syntax, same attributes,
-just landing on a different pane. See Section 5/6 for why RSI needed
-its own full copy of the drawing tools rather than sharing the main
-chart's.
+just landing on a different pane.
 
 - Parsed with a simple `key=value` attribute parser; quoted values
   support spaces.
@@ -156,11 +176,13 @@ chart's.
   crash the underlying charting library outright (see Section 6's
   "same-bar crash" bugs) — the parser rejects same-bar commands with an
   error rather than letting them through.
-- **Style (color/opacity/thickness/line-type) isn't in the protocol
-  yet** — see Section 0, item 8. Pasted commands always get the
-  default style for their type; style can currently only be changed
-  afterward via the ⚙ Style panel (mouse only).
-- **Still needs the tools from Section 0, item 7** before the protocol
+- **Style (color/opacity/thickness/line-type) still isn't in the
+  protocol** — see Section 0, item 5 for an important nuance added
+  this session: a pasted shape's non-color style now comes from the
+  tool's saved default, not always a hardcoded factory value.
+- **A new drawing's default relative-timeframe visibility changed this
+  session** — see Section 6.
+- **Still needs the tools from Section 0, item 6** before the protocol
   can grow to cover Rectangle/Arrow/Text/measurement tools.
 
 ---
@@ -180,105 +202,190 @@ else is calculated live in the browser:
   timeframe's raw file and computes EMA(10) fresh every time it's
   toggled on.
 
-**This is explicitly item 4 in Section 0's next-session plan** -
-moving this into `fetch_stock_timeframes.py` in the sibling repo is
-the stated direction, not yet started.
+This is still item 3 in Section 0's next-session plan (renumbered from
+the previous handoff) - moving this into `fetch_stock_timeframes.py` in
+the sibling repo, not yet started.
 
 **Multi-timeframe time-format handling:** daily-and-above stores `time`
 as a date string; intraday stores Unix timestamps. Overlaying one
 timeframe's data onto a chart of a different timeframe needs
 conversion - see `alignTimeToCurrentChart()` and `timeToNumeric()` /
-`extrapolatePrice()` in `index.html` (the latter two are also what the
-Ray drawing tool uses to extend a line while preserving its slope - see
-Section 7 for the log-scale nuance this involves).
+`extrapolatePrice()` in `index.html`.
 
 **Current watchlist (11 stocks):**
 `HPQ, COHR, ABNB, RKLB, IREN, NTRA, NEM, TTWO, KGS, CVSA, RMAX` — one
-per sector, chosen for turnover/variety. Section 0 item 5 plans to
-expand this.
+per sector, chosen for turnover/variety.
+
+### New this session: future placeholder bars + historical depth extension
+
+**The problem that started this:** a drawing made on Daily around
+2026-04-09 wasn't showing on Hourly or 15m when it should have. Root
+cause (confirmed by directly testing `resolveDrawingTime()` against the
+real data files, not just theorizing): **not a logic bug** - the
+timeframe-matching logic was working correctly, but the intraday data
+files simply didn't go back far enough in calendar time for that date
+to exist in them at all. All three intraday timeframes had the SAME
+bar *count* (600 each) but wildly different calendar *coverage*, since
+bar density per day differs enormously:
+- Hourly: 600 bars = 119 calendar days
+- 15m: 600 bars = only 31 calendar days
+- 5m: 600 bars = only 9 calendar days
+
+**Fix #1 - 15m historical extension:** 15m extended backward from 31 to
+138 days (matching Hourly's range), by **synthesizing intraday bars
+grounded in the real daily OHLC** for each added day - not random
+noise. For each day, the daily bar's own open/high/low/close bounds a
+random-walk path (open → close, touching the day's real high and low
+at some point, small bar-to-bar noise layered on top), volume/turnover
+split across the day's bars with light randomness, EMA columns held at
+that day's daily EMA value (a simplification - real intraday EMA would
+evolve within the day, this doesn't, but it's a minor visual
+imperfection for what's fundamentally placeholder/demo data). Verified
+before shipping: strictly chronological, valid OHLC relationships
+throughout (no bar where high < max(open,close) etc.), and a sample
+day's synthesized open/close exactly matches that day's real daily
+bar. **5m was deliberately NOT extended** - matching Hourly's range for
+5m would need ~9,000+ bars per ticker (vs 15m's ~2,600), a large jump
+in file size for a smaller marginal benefit. See Section 0 item 4.
+
+**Fix #2 - future placeholder bars:** the user separately asked for
+"about half a screen of blank future" on every timeframe, so
+annotations aren't confined to the past, with known earnings dates
+marked on that future space. All 77 files now extend past their last
+real bar with **flat placeholder bars**: OHLC all equal to the last
+real close (a flat line, not fake price movement), volume/turnover
+zero, EMAs held at their last real value. Counts per timeframe were
+sized to reach comfortably past the furthest researched earnings date
+(2026-11-11): daily +75 trading days, weekly +16 weeks, monthly +6
+months, quarterly +3 quarters, hourly +30 trading days, 15m +12 trading
+days, 5m +6 trading days. Cadence (weekday-only for daily/intraday,
+Monday-anchored weekly, 1st-of-month monthly, Feb/May/Aug/Nov-anchored
+quarterly) matches each file's own existing pattern exactly - verified
+by inspecting the last 5 real bars' day-of-week/date pattern for each
+timeframe before writing the generator.
+
+**`chart_earnings.json` was reconciled against fresh web research**
+for all 11 tickers' next earnings dates: fixed one stale `is_future`
+flag (IREN had a 2024 date incorrectly still flagged `true`), upgraded
+three tickers from estimated to company-confirmed dates (HPQ Aug 26 →
+Sep 1 confirmed; NTRA Nov 5 → Nov 11 confirmed; IREN Aug 27 → Sep 16
+confirmed), and added TTWO's next date (Nov 5) which was completely
+missing. Every future earnings date was verified to land on an exact
+bar in that ticker's daily file (not just "close enough") so the
+existing `findEarningsBarTimes()` marker logic anchors to the right
+day instead of silently snapping to today's bar.
+
+**Two follow-on bugs this surfaced and fixed, worth remembering for any
+future data-extension work:**
+1. **`fitContent()` fits ALL loaded bars**, including the new flat
+   future ones - left as-is, this would zoom out to squash real
+   candles down to make room for a long flat line by default. Replaced
+   with a calculated `setVisibleLogicalRange` showing real bars and
+   future bars in roughly equal proportion (both the main chart and
+   RSI's own `fitContent()` call needed this fix).
+2. **Several places assumed `array.length - 1` meant "today's bar"**
+   (headline price/change stats, the daily-stats box, the
+   crosshair-leave fallback) - no longer true once arrays extend into
+   the future. Added `lastRealBarIndex(bars)` (scans backward for the
+   first bar with non-zero volume) and fixed every call site that had
+   this assumption. **If more future-dated data is ever added to this
+   app, grep for `.length - 1` first** - it's the fastest way to find
+   every place carrying this same assumption.
 
 ---
 
-## 5. Visual design (current state, build 47)
+## 5. Visual design (current state, build 68)
 
-**Layout:** Watchlist (left) | main area | — no right sidebar anymore
-(removed a while back; see Section 7). Header row: ticker/name,
-timeframe buttons (5m/15m/1H/D/W/M/Q, left-aligned), then far-right:
-seven icon buttons — 🗑 Clear all, 🗒 Copy chart state text, 📄 Save
-chart state text to file, 📥 Paste from Claude (opens a temporary
-modal), 📋 Copy image, ⬇ Save image, ✦ Copy image for Claude (bakes the
-full Chart State text into the image itself, so one paste gives Claude
-both the picture and the context in a single action). A thin status
-bar sits directly below the header.
+**Layout:** Watchlist (left) | main area | RSI pane (bottom by default,
+**now repositionable to top** - see below). Header row: ticker/name,
+timeframe buttons (5m/15m/1H/D/W/M/Q), **then the drawing toolbar
+(moved here this session - previously a floating vertical bar on the
+main chart's left edge)**, separated by a thin vertical divider, then
+far-right: seven icon buttons — 🗑 Clear all, 🗒 Copy chart state text,
+📄 Save chart state text to file, 📥 Paste from Claude, 📋 Copy image,
+⬇ Save image, ✦ Copy image for Claude. A thin status bar sits directly
+below the header.
 
-**Main chart:** candlesticks, **semi-log (logarithmic) price scale**,
-wicks/borders always black — this log scale is the source of two
-separate, now-fixed drawing-tool bugs, see Section 7. Header stats line
-(ticker · timeframe · change/%/range/volume) is hover-reactive -
-updates to whichever bar the crosshair is over (defaulting to the
-latest bar), computing change and % vs. that bar's own previous close
-(not the visible range's start), and a "Range" figure that includes any
-gap from the prior close. All text in this line is plain black
-(color-coding was removed per user request); the word "Range" itself
-was also removed, leaving just a signed number in that slot.
+**Main chart:** candlesticks, semi-log (logarithmic) price scale,
+wicks/borders always black. Header stats line is hover-reactive,
+defaulting to the latest bar - **now correctly means the latest REAL
+bar, not the last array index** (see Section 4's `lastRealBarIndex`
+fix).
 
-**Volume panel:** bottom ~25% via scaleMargins trick, raw share volume
-(red/teal), Volume EMA 20 dashed line, "Volume" alone omitted from the
-Chart State text (visually obvious from the image) but Volume EMA 20
-still listed.
+**Volume panel:** bottom ~25% via scaleMargins trick, unchanged.
 
-**RSI panel:** separate chart instance (architecture reasons in
-Section 7), **linear 0-100 scale (not logarithmic)**, with its own
-independent timeframe selector (5m/15m/1H/D/W/M/Q) - defaults to
-matching the main chart but can be set differently; pan/zoom sync
-between the two charts only happens when both show the same timeframe.
-**Now has its own full drawing toolbar** (Section 6) - a separate
-`rsiBarsData` array tracks RSI's own current bars (which can be a
-different timeframe than the main chart's `barsData`) so drawing tools
-there snap to the right bars.
+**RSI panel:** separate chart instance, linear 0-100 scale, own
+independent timeframe selector. Several new capabilities this session:
+- **⚙ RSI Settings panel** (gear icon in the RSI header row, panel
+  itself renders centered in the main chart area - it started
+  anchored to the RSI pane itself, then the top-right corner of the
+  main chart, before landing on centered, since the RSI pane is too
+  short to fit the whole panel and the corner anchor wasn't visible
+  enough). Covers: **Pane** position (Top/Bottom dropdown), **RSI
+  Line** style (color/thickness/line-type), and **Upper/Middle/Lower**
+  levels in that order, each with its own on/off + threshold value AND
+  its own independent color/thickness/line-type (not a shared style
+  across all three, per explicit user request). Defaults: Upper 60 on,
+  Lower 40 on, Middle 50 off. Changes apply live immediately; **Set as
+  Default** persists the current settings to localStorage
+  (`rsiSettings_v1`); **Restore Default** reloads whatever was last
+  saved there (or the factory defaults if nothing ever was) -
+  discarding any live-but-unsaved tweaks, INCLUDING resetting the
+  pane's height back to 150px (position is left alone).
+- **Mouse-resizable** - a drag handle sits on whichever edge borders
+  the main chart (flips automatically with position), clamped 80-500px
+  tall.
+- **Repositionable to the top of the page** (default: bottom) via the
+  settings panel's Position dropdown.
+- Both height and position **auto-persist immediately** on change
+  (`rsiLayout_v1` in localStorage) - no separate save step, unlike the
+  style settings above, since there's only ever one "current" layout.
 
-**Drawing toolbars:** main chart has one (left edge, vertical, 5
-buttons), RSI panel has its own compact copy (same 5 buttons, scaled
-down to fit the shorter pane) - Cursor, Trend Line, Horizontal Line,
-Ray, Horizontal Ray. **All fully working** as of build 47 - draw,
-select (click a line), drag to reshape from either end, drag a
-midpoint handle to move the whole shape, delete (button or
-Delete/Backspace key), and a ⚙ Style panel (color picker + 12 preset
-swatches, opacity slider, thickness 1-4px, line type solid/dashed/
-dotted). See Section 6 for the full history of what had to be fixed to
-get here, and Section 7 for the architecture that makes both panes
-share the same code.
+**Drawing toolbar:** now a single shared toolbar living in the header
+(not two separate copies per pane anymore in terms of UI - it was
+always one shared `sharedToolState` underneath, see Section 7, but the
+main chart previously had its own floating vertical copy; RSI's was
+already compact). Same 5 buttons: Cursor, Trend Line, Horizontal Line,
+Ray, Horizontal Ray.
 
-**Indicator legend:** collapsible ("Indicators ▾"), closes on
-outside-click. Six columns, each with its own master checkbox
-(remembers individual row states when toggled off/on):
-1. **Standard EMAs** - EMA 10/20/50/200.
-2. **M10s** - 7 fixed-timeframe EMA(10) overlays.
-3. **Relative M10s** - Current TF / 1 TF above / 2 TFs above (offset
-   relative to whatever the main chart currently shows).
-4. **Volume** - Volume bars, Volume EMA 20.
-5. **Events** - Earnings, 10/20 EMA cross (both moved here from other
-   columns per user request).
-6. **Indicators** - currently just RSI(14), deliberately its own
-   column since more RSI-related indicators are expected later.
+**Floating panels (Style, Timeframe, RSI Settings) are all
+draggable** - each has a small labeled title bar at the top (`Style`,
+`Timeframe`, `RSI Settings`) that can be mouse-dragged anywhere on
+screen, via one shared `makeDraggable(panelEl, handleEl)` helper. Added
+because panels could sometimes render partially off-screen depending
+on where the triggering drawing/button was.
 
-**Standing instruction from the user:** whenever a new indicator is
-added, (a) add its swatch color to the `COLOR_NAMES` lookup (used to
-name colors in the Chart State text), and (b) explicitly ask the user
-whether it should be included in that text output - never assume
-either way.
+**Timeframe visibility model — significantly reworked this session**
+(see Section 6 for the full history of iterations). Current final
+state:
+- Two independent columns, each with its own On/Off master switch that
+  is a pure bypass toggle (does NOT read or write the individual
+  checkboxes under it) - Absolute ("Show on" 5m/15m/1H/D/W/M/Q) starts
+  **off** by default now; Relative starts **on**.
+- The Relative column's higher/lower boxes are **cumulative ranges**
+  ("2 higher" means home + 1 + 2 higher, not just exactly 2 higher),
+  displayed **radio-button style** (picking a number unticks the
+  others on that side, but still means "up to that number"
+  underneath).
+- A range always includes its own home timeframe - picking "2 higher"
+  shows on home + 1 + 2 higher, not "2 higher, excluding home."
+  "Current" alone means "only home, nothing else."
+- **New default for new drawings: "2 higher" AND "2 lower" both on**
+  (previously just "2 higher"), absolute column off. A drawing made on
+  Daily now shows on 15m through Monthly by default.
 
-**Earnings badges:** small rounded-square orange badges (changed from
-an earlier pentagon shape - see Section 7), plain HTML overlays
-positioned via the chart's `timeToCoordinate()` for X and a fixed CSS
-value for Y. Daily-and-above timeframes only.
+**Per-tool style/timeframe defaults ("Set as Default" / "Restore
+Default"), same pattern as RSI settings above** - each of the 4 line
+tools (Trend Line, Horizontal Line, Ray, Horizontal Ray) independently
+remembers its own saved style (color/opacity/thickness/line-type) and
+its own saved timeframe-visibility defaults, persisted to localStorage
+(`chartToolDefaults_v1`) and applied to every NEW drawing of that tool
+going forward - separate per tool, separate between style and
+timeframe (four independent save slots per tool). See Section 0 item 5
+for how this interacts with pasted (Claude-authored) commands.
 
-**Screenshot capture:** uses `html2canvas` (not the charting library's
-own limited screenshot function) so HTML overlays - earnings badges,
-info boxes - are correctly included. Scoped to just the chart area,
-never the watchlist or header. The "for Claude" variant additionally
-renders the full Chart State text as real, readable text appended
-below the image.
+**Indicator legend, earnings badges, screenshot capture:** unchanged
+from last handoff.
 
 ---
 
@@ -289,10 +396,10 @@ All five confirmed TradingView tools from the original toolbar audit:
 | Tool | Status |
 |---|---|
 | Cursor (select/pan) | **Built** |
-| Trend Line | **Built, fully working (build 47)** |
-| Horizontal Line | **Built, fully working (build 47)** |
-| Ray | **Built, fully working (build 47)** |
-| Horizontal Ray | **Built, fully working (build 47)** |
+| Trend Line | **Built, fully working** |
+| Horizontal Line | **Built, fully working** |
+| Ray | **Built, fully working** |
+| Horizontal Ray | **Built, fully working** |
 | Rectangle | Not built |
 | Price Range | Not built |
 | Text | Not built |
@@ -305,196 +412,193 @@ All five confirmed TradingView tools from the original toolbar audit:
 | Eraser | Not built |
 
 **What "fully working" covers, per tool:** draw via 2 clicks (Trend
-Line/Ray) or 1 click (Horizontal Line/Ray) with a live dashed preview
-that follows the mouse before the shape commits; click an existing
-shape to select it (drag handles appear at each editable point, plus a
-square handle at the midpoint for moving the whole shape as a unit);
-Delete button or Delete/Backspace key removes the selected shape;
-⚙ Style panel for color (picker + 12 presets)/opacity/thickness/line
-type. Both the main chart and the RSI panel have this full set,
-independently.
+Line/Ray) or 1 click (Horizontal Line/Ray) with a live dashed preview;
+click to select (drag handles at each editable point, plus a midpoint
+handle to move the whole shape); Delete button or key; ⚙ Style panel;
+🕐 Timeframe panel (visibility controls, see below). Both the main
+chart and the RSI panel have this full set via the same shared
+`createDrawingPane()` factory (Section 7).
 
-**The debugging history that got here** (useful context if similar
-symptoms reappear):
+### The timeframe-visibility model's design history (multiple iterations this session)
 
-1. **No live preview while drawing, no way to select/edit after the
-   fact** — the original state going into this work. Fixed by adding a
-   dashed preview series during the 2-click draw, and a full selection
-   system (handles, move, delete, style) for after.
-2. **`Uncaught RangeError: Maximum call stack size exceeded`,
-   repeatedly, when finishing a Trend Line/Ray** — a real bug in the
-   underlying Lightweight Charts library, triggered by two data points
-   on the *same bar* (which happens constantly, since the mouse always
-   passes back over the anchor's own bar right after the first click).
-   Fixed with same-bar guards at every point a line's two times could
-   coincide: the live preview, the finishing click, drag handles, and
-   the pasted-command parser.
-3. **Same crash, still happening** after fix #2 — turned out to be a
-   *second*, unrelated trigger for the identical library bug: calling
-   `setData()` synchronously on every single mouse-move event during
-   the live preview. Fixed by (a) excluding every drawing series from
-   the price scale's auto-fit calculation via
-   `autoscaleInfoProvider: () => null`, and (b) throttling preview
-   updates to once per animation frame via `requestAnimationFrame`
-   instead of updating synchronously inside the event handler.
-4. **A "strange dot" appearing off in empty space near a Ray, and its
-   midpoint not actually sitting on the line** — two related but
-   distinct bugs, both stemming from the chart's **logarithmic price
-   scale**:
-   - The move-handle/Style-Delete toolbar were positioned using the
-     midpoint between the anchor and Ray's *extrapolated far edge*,
-     which can land at a price way outside the visible chart for a
-     short, steep ray. Fixed by positioning that UI from the two real
-     click points instead (`getAnchorPoints()`), never the
-     extrapolated edge.
-   - Separately, `extrapolatePrice()` was doing **linear** math on raw
-     price values, but a straight line on a **logarithmic** axis is
-     only straight in `log(price)` space. This meant the real second
-     click that defined a Ray's slope was never genuinely on the
-     rendered line — confirmed numerically (4.83px off) before fixing,
-     and 0px off after switching the extrapolation to log space.
-   **If a pane's price-scale mode is ever changed (log ↔ linear), the
-   `isLog` flag passed to that pane's `createDrawingPane({...})` call
-   must be updated to match, or these same two categories of bug come
-   back** — see the large comment above `createDrawingPane` in
-   `index.html`.
-5. **Dragging a shape via its move-handle visibly changed its angle** —
-   same log-scale root cause as #4, this time in the move math: it was
-   shifting both points by a constant *raw price* amount, but a
-   constant raw-price offset changes the `log(price)` difference (and
-   so the visual angle) depending on where on the log scale you are.
-   Fixed by moving with a constant price *ratio* instead, which
-   preserves the log-difference — confirmed numerically before
-   shipping (log-diff 0.182 stayed 0.182 after the fix; the old
-   additive method drifted to 0.065).
-6. **Selection handles could appear anywhere on the page** — clicking a
-   scroll-off-screen shape's handles rendered them wherever their raw,
-   unclamped pixel coordinates landed: in the watchlist (negative x),
-   the header/timeframe row (negative y), the price-axis gutter (x past
-   the plot), or a neighboring pane (y past the pane height). The
-   selection overlay was never actually clipped to the pane. Fixed by
-   checking every handle/button's position against the pane's real
-   pixel bounds before rendering it at all, rather than trusting the
-   raw coordinate math to land inside the chart.
+This went through several rounds before landing on the state described
+in Section 5 - worth knowing if the design gets revisited again:
+
+1. Started as two columns (absolute per-TF checkboxes, relative
+   higher/lower/current) each defaulting all-checked, with a master
+   "All" checkbox that tried to remember prior state on toggle.
+2. **Bug:** the "All" master both READ and WROTE the individual
+   checkboxes, so unchecking one box auto-unchecked "All," and
+   re-checking "All" reset everything to all-true rather than
+   restoring what was there before - not genuinely "remembering."
+   **Fixed** by making the master a pure bypass switch
+   (`timeframesColumnEnabled`/`relativeTFColumnEnabled`) that never
+   touches the individual boxes at all - flipping it off just means
+   the column is ignored, flipping it back on means whatever was
+   checked underneath still applies, since it was never changed.
+3. **Redefined "higher N"/"lower N" as cumulative ranges** ("3 higher"
+   = up to 3 higher, not just exactly 3) rather than independent single
+   offsets - this is what real trading platforms mean by this kind of
+   control, and avoids a confusing "nothing shows because you only
+   checked +3 without +1/+2" state.
+4. **Switched the checkbox display to radio-button style per side**
+   (picking N unticks the others on that side) after the user found
+   multiple simultaneously-ticked boxes confusing to read, even though
+   the underlying cumulative meaning didn't change - `matchesRelativeTF`
+   already worked off "highest checked value per side," so this was a
+   pure UI change, no logic change needed.
+5. **Made "current" (home) always implied by ANY picked range**, not
+   mutually exclusive from it - a "2 higher" pick now also shows on
+   home itself, not just the two timeframes above it. Only bare
+   "current" with nothing else picked means "only home."
+6. **Root-caused an apparent visibility bug that turned out to be a
+   data-coverage limitation, not a logic bug** - see Section 4's "the
+   problem that started this" writeup. Confirmed via direct console
+   inspection of a real drawing's raw stored data
+   (`mainPane.userDrawings[0]`), not just re-reading the UI - the panel
+   accurately reflected the underlying state the whole time; the issue
+   was that the intraday files didn't go back far enough for the
+   drawing's own date to exist in them.
+7. **Changed the default for new drawings** from "2 higher only" to "2
+   higher AND 2 lower," absolute column off by default - directly
+   requested once the historical-coverage gap above made the
+   asymmetry (showing on Weekly/Monthly but not Hourly/15m) obvious in
+   practice.
 
 **Ray/Horizontal Ray extension nuance (still true):** neither is truly
-infinite - both extend only as far as the currently *loaded* data (500
-bars for daily, full history for weekly/monthly/quarterly, etc.),
-computed once at draw time. This is a deliberate, pragmatic tradeoff
-(avoiding the complexity of dynamically re-extending lines on every
-pan/zoom event) — see Section 0, item 7/8 and Section 8.
+infinite - both extend only as far as the currently *loaded* data,
+computed once at draw time.
 
 ---
 
 ## 7. Architecture notes worth knowing (hard-won, don't repeat these)
 
 **Drawing tools are one shared, pane-agnostic implementation
-(`createDrawingPane()`), not copy-pasted per pane.** Adding RSI's
-drawing toolbar didn't duplicate the ~500 lines of draw/select/move/
-delete/style logic - it's a factory function taking a small config
-(getters for the pane's current chart/series/container/bars array, its
-own overlay `<div>` id and toolbar selector, and whether its price
-scale is logarithmic), instantiated once for the main chart
-(`mainPane`) and once for RSI (`rsiPane`). **To add drawing tools to a
-future indicator pane:** give it its own toolbar + overlay `<div>` in
-the HTML (copy `#rsi-draw-toolbar`/`#rsi-drawing-overlay` as a
-template), then one `createDrawingPane({...})` call — no changes
-needed to the factory itself. Every chart-instance reference inside the
-factory goes through a getter rather than being captured once, which
-matters for RSI specifically since its chart is destroyed and recreated
-every time RSI is toggled off/on (`rsiChart`/`rsiSeries` become `null`
-then get fresh instances) - `rsiPane.attach()` gets called again on the
-new instance each time, and `rsiPane.reset()` clears its own state
-before the old one is torn down.
+(`createDrawingPane()`), not copy-pasted per pane.** Unchanged from
+last handoff - see previous version of this doc (or the code comment
+above `createDrawingPane` in `index.html`) for the full explanation.
+Still the right template for adding drawing tools to any future
+indicator pane (Section 0, item 3).
+
+**The temporal-dead-zone crash class recurred this session with a
+DIFFERENT variable, and broke the entire page again the same way.**
+`LINE_STYLE_MAP` (a `const`) was defined down in the drawing-tools
+section of the script, but `createRsiChart()` - called synchronously
+near the top of the script on every page load - now calls
+`applyRsiSettings()`, which references `LINE_STYLE_MAP` before its
+declaration line had executed. Symptom was identical to the earlier
+`barsData` incident: completely blank page, empty watchlist, nothing
+loads, one red `ReferenceError: Cannot access 'X' before initialization`
+in the console. **Fixed** by moving `LINE_STYLE_MAP`'s declaration up
+next to the other early declarations that already carry a comment
+explaining this exact failure class. **General rule reinforced: before
+adding any new top-level `const` that a function called synchronously
+early in the script will reference, check it's declared before that
+call point - or declare the helper as a `function` instead of a `const
+() => {}` arrow, since function declarations are fully hoisted and
+immune to this entire bug class.** This is exactly the pattern used
+for `lastRealBarIndex` (Section 4) - deliberately a `function`
+declaration so it's safely callable from code earlier in the file
+regardless of its own textual position.
+
+**Extending an app's data to include future-dated placeholder entries
+breaks any code that assumed "last array item = the current/latest
+real one."** See Section 4's writeup - this is a general lesson beyond
+just this specific feature: any time historical data gets extended
+with placeholder/future/synthetic entries at either end, search for
+every place indexing via `.length - 1` (or equivalent "last item"
+logic) before shipping, not just the one call site that prompted the
+change.
+
+**Resizable + repositionable panes: a pane's height goes through a
+single `applyLayout()`-style function that (a) sets the container's
+CSS height, (b) repositions any drag handle to whichever edge borders
+the neighboring pane, and (c) calls the chart library's own
+`applyOptions({width, height})` to force a redraw** - the container
+resizing via CSS alone does NOT make the chart library redraw itself,
+same class of gotcha as the `fitContent()` issue in Section 4. Position
+toggling (top/bottom) is a single CSS `order` flip on the flex
+container, no DOM reordering needed. See `rsiLayout`/`applyRsiLayout`/
+`resizeChartsForRsiLayout` in `index.html` for the concrete pattern -
+worth reusing directly for a second indicator pane.
+
+**Two-step "live preview vs. saved default" is now a repeated pattern
+across three different settings surfaces** (drawing-tool Style panel,
+drawing-tool Timeframe panel, RSI Settings panel) - every field change
+applies immediately so you see the effect, but only becomes "the
+default for next time" when "Set as Default" is explicitly clicked;
+"Restore Default" reloads whatever's currently saved (or the factory
+default if nothing's been saved), discarding unsaved live tweaks. Each
+of the three currently has its own separate implementation of this
+pattern rather than one shared helper - a reasonable target for
+consolidation if a fourth settings surface is ever added.
+
+**Draggable floating panels share one helper, `makeDraggable(panelEl,
+handleEl)`** - converts whatever positioning got the panel there
+(a centering transform, a corner anchor) into explicit top-left pixels
+on the first mousedown, using the panel's actual on-screen
+`getBoundingClientRect()`, then just tracks mouse delta from there.
+Works regardless of the panel's original CSS positioning scheme.
+
+**Synthesizing plausible intraday data from real daily OHLC:** the
+technique used to extend 15m's historical range (Section 4) -
+constrained random walk from the day's open to its close, forced to
+touch the day's actual high and low at some point, small bar-to-bar
+noise layered on top, volume/turnover split across the day's bars with
+light randomness, EMA columns held flat at that day's daily EMA value.
+Reusable directly if 5m ever needs the same treatment (Section 0, item
+4), or if a future indicator needs synthetic historical intraday data
+for any other reason.
 
 **The main chart's logarithmic price scale is a recurring source of
-subtle bugs for anything involving slope/extrapolation.** See Section
-6, bugs #4 and #5, for two real examples and their fixes. The general
-lesson: any code computing a point "along a line" on this chart needs
-to interpolate in `log(price)` space, not raw price, or the result will
-be mathematically correct in the wrong space and visibly wrong on
-screen. RSI's panel is a plain linear 0-100 scale, so this doesn't
-apply there — which is exactly why `isLog` is a per-pane flag rather
-than a global assumption.
+subtle bugs for anything involving slope/extrapolation** - see the
+previous version of this document for the two concrete examples (a
+Ray's move-handle landing off the line, and dragging changing a
+shape's angle). Still true, no new incidents this session.
 
 **RSI needed a genuinely separate chart instance, not a shared-canvas
-trick.** A single canvas's price-axis labels render across its FULL
-height regardless of `scaleMargins` - margins only affect where data
-plots, not where axis labels draw. Symptom was price numbers appearing
-to repeat all the way through where RSI should have been. Fixed with
-a real second `LightweightCharts.createChart()` instance, synced via
-`subscribeVisibleLogicalRangeChange` (only when both charts show the
-same timeframe).
+trick.** Unchanged from last handoff.
 
 **A missing `min-height: 0` / `min-width: 0` on CSS Grid items caused
-two separate "impossible" bugs** - RSI refusing to reopen after being
-toggled off (vertical), and the entire right sidebar disappearing on a
-different monitor (horizontal, before the sidebar was removed
-entirely). Without these properties, a grid item's own content can
-force it larger than its assigned space rather than compressing to
-fit, and `overflow: hidden` on `<body>` meant there was no way to
-scroll to the overflow. All three grid columns needed both properties.
-**If a similarly "impossible" layout bug appears again, check this
-class of issue early.**
+two separate "impossible" layout bugs** previously. Unchanged, no new
+incidents this session, but keep this class of issue in mind if a
+similarly "impossible" layout bug appears again.
 
 **When debugging "creates successfully but doesn't render" (or "should
 work but doesn't"), build a real headless-JS simulation rather than
-guessing repeatedly.** Used successfully several times now: the
-original `barsData` temporal-dead-zone crash that broke the entire page
-(found via a hand-rolled Node `vm` context mimicking `document`/
-`window`), and — more recently — the same-bar crash and both log-scale
-drawing-tool bugs in Section 6, each confirmed numerically with a small
-Node script *before* shipping the fix, rather than trusting the theory
-alone. Worth reaching for this early rather than after several rounds
-of speculative fixes.
+guessing repeatedly.** Reinforced heavily again this session - used to
+confirm the TDZ crash above (reproduced the exact error in isolation
+before fixing), to verify the timeframe cumulative-range/radio-button
+logic at each redesign step, to verify the resize-drag direction math
+for both RSI pane positions, and to verify the future-bars data
+generator's output (chronological order, valid OHLC relationships,
+exact match against real daily bars) before ever shipping it. Also used
+direct browser console inspection (`mainPane.userDrawings[0]`,
+expanded fully) to settle a case where the reported symptom didn't
+match what pure code-reading predicted - turned out to be a data-
+coverage issue, not a logic bug (Section 4/6). **When a user's
+report contradicts what the code should do, get the actual runtime
+state (console inspection or a targeted simulation) before assuming
+either "user is misreading the UI" or "there's a hidden bug" - both
+have turned out to be true at different points in this project.**
 
 **Earnings badges are plain HTML, not Lightweight Charts markers, and
-use a rounded square, not a pentagon.** The pentagon shape (CSS
-`clip-path`) looked right on screen but `html2canvas` doesn't support
-`clip-path`, so captured screenshots showed a plain square instead -
-inconsistent with the live page. Simplified the on-screen badge to
-match what the capture can actually reproduce, rather than the other
-way around, so both are consistent everywhere.
-
-**Column master checkboxes remember individual state** on toggle
-off/on, rather than resetting to "everything on."
+use a rounded square, not a pentagon.** Unchanged from last handoff.
 
 **For "must sit at an exact, predictable pixel position" requirements,
 prefer plain CSS over fighting a charting library's own coordinate
-system.** Getting the earnings badges to sit at a consistent height
-took several failed rounds using Lightweight Charts' own marker/
-price-scale system (synthetic anchor values, fixed-range scales, a
-dedicated price scale) - none behaved predictably. Switching to plain
-HTML `<div>` elements (X position from the chart's own
-`timeToCoordinate()`, Y position an ordinary fixed CSS value) solved it
-immediately and reliably. The drawing tools' selection handles and ⚙
-Style panel use the same approach for the same reason - just with the
-added step (Section 6, bug #6) of clamping to the pane's actual pixel
-bounds before rendering, since "exact pixel position" also needs to
-account for that position sometimes falling outside the visible pane
-entirely.
+system.** Unchanged from last handoff.
 
-**GitHub Pages URLs are case-sensitive.** A repo named `Chart`
-(capital C) serves at `.../Chart/`, not `.../chart/` - visiting the
-lowercase version 404s even though it looks like the same address.
-Caused real confusion once already; if a live page ever 404s
-unexpectedly, check the exact repo name's capitalization before
-assuming a deployment or code problem.
+**GitHub Pages URLs are case-sensitive.** Unchanged from last handoff.
 
 **Browser caching caused repeated false "it's still broken" reports.**
-The build-number watermark (Section 2) exists specifically to catch
-this. **Whenever the user reports something as not working that should
-already be fixed, ask them to confirm the watermark number and do a
-hard refresh (Ctrl+Shift+R / Cmd+Shift+R) before investigating
-further** - this has repeatedly turned out to be chasing a stale cached
-version rather than a real bug.
+Still true, still the first thing to check - confirmed useful again
+this session (several rounds of "check the build-number watermark and
+hard-refresh" before investigating further, more than once correctly
+resolved what looked like a bug).
 
-**The right sidebar was removed entirely** (replaced by header icon
-buttons + a temporary paste modal + a status bar). Every function that
-depended on the old sidebar elements was individually re-wired to its
-new home - `input-box` and `output-box` still exist in the DOM as
-hidden elements (not deleted) since other code still reads/writes them
-programmatically.
+**The right sidebar was removed entirely.** Unchanged from last
+handoff.
 
 ---
 
@@ -503,13 +607,20 @@ programmatically.
 See Section 0 for the actively-planned next steps. Additionally:
 
 - **"RichRoad MA v3"** (an indicator visible in the user's real
-  TradingView setup) is still not replicated - formula unknown, a
-  strong candidate for the eventual concept-teaching phase (Section 0,
-  item 9).
+  TradingView setup) is still not replicated.
 - **Rays are not truly infinite** - see Section 6.
-- **Only 11 of ~155 typical scan-day stocks are in the watchlist** -
-  Section 0 item 5.
-- **The text protocol doesn't carry style (color/opacity/thickness/
-  line-type)** - Section 0 item 8, Section 3.
+- **Only 11 of ~155 typical scan-day stocks are in the watchlist.**
+- **The text protocol doesn't carry style** - Section 0 item 5.
+- **5-minute data's historical depth is unchanged (~9-14 days)** -
+  Section 0 item 4, Section 4.
+- **No persistent storage** - annotations live only in the browser's
+  current session/localStorage, lost on switching ticker or clearing
+  browser data. Discussed at length, deliberately deferred - Section 0
+  item 2.
 - **Rectangle, Arrow, Text, Price Range, Date Range, Date and Price
   Range, Path tool, Highlighter, Eraser** - none built yet, Section 6.
+- **No standalone Technical Reference doc exists yet** despite this
+  being flagged as needed twice now - Section 0 item 1. The gap
+  between "what's in this document" and "what would be needed to
+  rebuild the app from scratch on another platform" is real and has
+  grown this session, not shrunk.

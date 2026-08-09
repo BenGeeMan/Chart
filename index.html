@@ -871,7 +871,7 @@
       <div id="earnings-overlay"></div>
       <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">64</div>
+      <div id="build-number">66</div>
       <div id="main-no-data">No Data</div>
       <div id="rsi-settings-overlay"></div>
     </div>
@@ -1253,6 +1253,28 @@ function applyRsiLayout() {
   }
 }
 
+// Resizing the RSI pane shrinks/grows the MAIN chart's container too
+// (both share the same flex column, so one taking more room means the
+// other gets less) - but the chart library doesn't auto-redraw when
+// its container resizes, it needs an explicit resize call, same as
+// the window-resize handler already does elsewhere in this file. Kept
+// separate from applyRsiLayout above (rather than folded into it)
+// because THAT function also runs once during the very first page
+// load, before mainPane/rsiPane/positionDailyBox exist yet - calling
+// them that early would throw the same "used before initialization"
+// crash fixed earlier in this project. This function is only ever
+// called from user-triggered paths (dragging the resize handle,
+// changing pane position, Restore Default), always after the full
+// script - and those variables - have finished loading.
+function resizeChartsForRsiLayout() {
+  applyRsiLayout();
+  chart.applyOptions({ width: chartEl.clientWidth, height: chartEl.clientHeight });
+  renderEarningsOverlay();
+  mainPane.refreshOverlay();
+  rsiPane.refreshOverlay();
+  positionDailyBox();
+}
+
 // Drag-to-resize: mousedown on the handle, then track vertical mouse
 // movement to grow/shrink the RSI pane's height, clamped to a sane
 // range. Direction depends on which edge the handle is docked to (see
@@ -1269,7 +1291,7 @@ function applyRsiLayout() {
       const dy = ev.clientY - startY;
       const delta = rsiLayout.position === 'top' ? dy : -dy;
       rsiLayout.height = Math.max(RSI_MIN_HEIGHT, Math.min(RSI_MAX_HEIGHT, startHeight + delta));
-      applyRsiLayout();
+      resizeChartsForRsiLayout();
     };
     const onUp = () => {
       document.removeEventListener('mousemove', onMove);
@@ -2035,7 +2057,7 @@ function renderRsiSettingsPanel() {
   });
   positionSelect.addEventListener('change', () => {
     rsiLayout.position = positionSelect.value;
-    applyRsiLayout();
+    resizeChartsForRsiLayout();
     persistRsiLayout();
   });
   positionRow.appendChild(positionSelect);
@@ -2116,6 +2138,12 @@ function renderRsiSettingsPanel() {
     // nothing's ever been saved) - discards any live-but-unsaved tweaks.
     rsiSettings = loadRsiSettings();
     applyRsiSettings();
+    // Pane height auto-persists on every resize (no separate "saved
+    // default" step like the styles above), so "restore default" here
+    // means the factory size, not a previously-saved one.
+    rsiLayout.height = RSI_LAYOUT_FACTORY_DEFAULT.height;
+    resizeChartsForRsiLayout();
+    persistRsiLayout();
     renderRsiSettingsPanel();
   });
   actionsRow.appendChild(restoreDefaultBtn);

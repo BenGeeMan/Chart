@@ -784,7 +784,7 @@
       <div id="earnings-overlay"></div>
       <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">53</div>
+      <div id="build-number">54</div>
       <div id="main-no-data">No Data</div>
     </div>
     <div id="rsi-chart-container">
@@ -1209,16 +1209,29 @@ function defaultRelativeTF() {
 // timeframe for a given drawing regardless of what's currently being
 // viewed elsewhere). Missing relativeTF/homeTF (older drawings, or the
 // feature never touched) imposes no restriction.
+//
+// "higherN"/"lowerN" are CUMULATIVE ranges, not single offsets -
+// checking "3 higher" means "everything from home up to 3 higher"
+// (covers +1, +2, and +3), not just the exact +3 timeframe in
+// isolation. Matching uses whichever checked box has the LARGEST N on
+// each side, so this works correctly even if the checkboxes end up in
+// a non-contiguous state (e.g. only "+3" checked without "+1"/"+2") -
+// the panel's own UI keeps them contiguous via cascading, but this
+// doesn't assume that.
 function matchesRelativeTF(drawing, tfKey) {
   if (!drawing.relativeTF || !drawing.homeTF) return true;
   const homeIdx = TF_ORDER.indexOf(drawing.homeTF);
   const targetIdx = TF_ORDER.indexOf(tfKey);
   if (homeIdx === -1 || targetIdx === -1) return true;
   const offset = targetIdx - homeIdx;
-  if (offset === 0) return drawing.relativeTF.current !== false;
-  const key = offset > 0 ? 'higher' + offset : 'lower' + Math.abs(offset);
-  if (Math.abs(offset) > 3) return false; // no checkbox exists past 3 - can't match
-  return drawing.relativeTF[key] !== false;
+  const rel = drawing.relativeTF;
+  if (offset === 0) return rel.current !== false;
+  const side = offset > 0 ? 'higher' : 'lower';
+  let maxChecked = 0;
+  for (const n of [1, 2, 3]) {
+    if (rel[side + n] !== false) maxChecked = n;
+  }
+  return Math.abs(offset) <= maxChecked;
 }
 
 let markers = [];
@@ -2061,16 +2074,29 @@ function renderTimeframePanel(container, x, y, target, onVisibilityChange) {
     cb.addEventListener('mousedown', (e) => e.stopPropagation());
     cb.addEventListener('change', () => {
       target.relativeTF[relKey] = cb.checked;
-      // "current" (home) is mutually exclusive with the six higher/
-      // lower boxes - checking one clears the other side entirely.
-      if (cb.checked) {
-        if (relKey === 'current') {
-          relKeys.forEach((k) => { if (k !== 'current') target.relativeTF[k] = false; });
-        } else {
+      if (relKey === 'current') {
+        // "current" (home) is mutually exclusive with the six higher/
+        // lower boxes - checking it clears all of those.
+        if (cb.checked) relKeys.forEach((k) => { if (k !== 'current') target.relativeTF[k] = false; });
+      } else {
+        const side = relKey.startsWith('higher') ? 'higher' : 'lower';
+        const n = parseInt(relKey.slice(side.length), 10);
+        if (cb.checked) {
+          // "N higher/lower" is a cumulative range, not a single offset
+          // - checking it implies everything closer to home is
+          // included too (checking +3 without +1/+2 checked wouldn't
+          // make sense as "up to 3").
           target.relativeTF.current = false;
+          for (let i = 1; i < n; i++) target.relativeTF[side + i] = true;
+        } else {
+          // Unchecking a box below the top of the range would leave a
+          // gap (e.g. -1 unchecked but -2 still checked implies "-2 but
+          // not -1", which isn't a valid range) - clear everything from
+          // here outward too.
+          for (let i = n; i <= 3; i++) target.relativeTF[side + i] = false;
         }
-        relCheckboxes.forEach(({ cb: otherCb, key }) => { otherCb.checked = target.relativeTF[key] !== false; });
       }
+      relCheckboxes.forEach(({ cb: otherCb, key }) => { otherCb.checked = target.relativeTF[key] !== false; });
       commitChange();
     });
     label.appendChild(cb);

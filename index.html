@@ -168,6 +168,17 @@
     height: 150px;
     border-top: 1px solid var(--panel-border);
   }
+  #rsi-resize-handle {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 0;
+    height: 6px;
+    cursor: ns-resize;
+    z-index: 9;
+    background: transparent;
+  }
+  #rsi-resize-handle:hover { background: rgba(41,98,255,0.15); }
   #rsi-drawing-overlay {
     position: absolute;
     inset: 0;
@@ -860,11 +871,12 @@
       <div id="earnings-overlay"></div>
       <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">63</div>
+      <div id="build-number">64</div>
       <div id="main-no-data">No Data</div>
       <div id="rsi-settings-overlay"></div>
     </div>
     <div id="rsi-chart-container">
+      <div id="rsi-resize-handle" title="Drag to resize"></div>
       <div id="rsi-label">RSI (14)</div>
       <button id="rsi-settings-btn" title="RSI settings">⚙</button>
       <div id="rsi-tf-buttons">
@@ -1149,19 +1161,17 @@ let rsiTF = 'daily'; // RSI's own timeframe - independent of the main chart's
 
 // --- RSI's own settings: the RSI line's color/thickness/line-type, and
 // three optional reference lines (Upper/Lower/Middle), each with its
-// own on/off + threshold value, sharing one color/thickness/line-type
-// between the three of them (matches how these are usually styled as
-// a single visual group on real trading platforms, rather than three
-// independently-colored lines). Persisted separately from the drawing-
-// tools' own per-tool defaults (see TOOL_DEFAULTS_STORAGE_KEY above) -
-// this is about the RSI INDICATOR itself, not anything drawn on it.
+// own on/off + threshold value + its OWN independent color/thickness/
+// line-type (each of the 3 levels can look completely different from
+// the others). Persisted separately from the drawing-tools' own per-
+// tool defaults (see TOOL_DEFAULTS_STORAGE_KEY above) - this is about
+// the RSI INDICATOR itself, not anything drawn on it.
 const RSI_SETTINGS_STORAGE_KEY = 'rsiSettings_v1';
 const RSI_SETTINGS_FACTORY_DEFAULT = {
   line: { color: '#131722', lineWidth: 1, lineStyle: 'solid' },
-  refLine: { color: '#9a9ea6', lineWidth: 2, lineStyle: 'dashed' },
-  upper: { enabled: true, value: 60 },
-  lower: { enabled: true, value: 40 },
-  middle: { enabled: false, value: 50 },
+  upper: { enabled: true, value: 60, color: '#9a9ea6', lineWidth: 2, lineStyle: 'dashed' },
+  middle: { enabled: false, value: 50, color: '#9a9ea6', lineWidth: 2, lineStyle: 'dashed' },
+  lower: { enabled: true, value: 40, color: '#9a9ea6', lineWidth: 2, lineStyle: 'dashed' },
 };
 
 function loadRsiSettings() {
@@ -1169,14 +1179,13 @@ function loadRsiSettings() {
     const raw = localStorage.getItem(RSI_SETTINGS_STORAGE_KEY);
     const saved = raw ? JSON.parse(raw) : null;
     // Deep-merge over the factory default so a partially-saved/older
-    // settings object (e.g. from before "middle" existed) still gets
-    // sensible values for anything it's missing.
+    // settings object (e.g. from before each level had its own style)
+    // still gets sensible values for anything it's missing.
     return {
       line: Object.assign({}, RSI_SETTINGS_FACTORY_DEFAULT.line, saved && saved.line),
-      refLine: Object.assign({}, RSI_SETTINGS_FACTORY_DEFAULT.refLine, saved && saved.refLine),
       upper: Object.assign({}, RSI_SETTINGS_FACTORY_DEFAULT.upper, saved && saved.upper),
-      lower: Object.assign({}, RSI_SETTINGS_FACTORY_DEFAULT.lower, saved && saved.lower),
       middle: Object.assign({}, RSI_SETTINGS_FACTORY_DEFAULT.middle, saved && saved.middle),
+      lower: Object.assign({}, RSI_SETTINGS_FACTORY_DEFAULT.lower, saved && saved.lower),
     };
   } catch (e) {
     return JSON.parse(JSON.stringify(RSI_SETTINGS_FACTORY_DEFAULT));
@@ -1193,6 +1202,84 @@ function persistRsiSettings() {
     // if storage is unavailable, still works for this session.
   }
 }
+
+// --- RSI pane layout: height (mouse-resizable) and position (top or
+// bottom of the page, default bottom) - separate from rsiSettings
+// above since this is about the PANE itself, not what's drawn in it.
+// Applies immediately and persists right away (no separate "set as
+// default" step - there's only ever one current layout, unlike the
+// per-tool style defaults where "what I'm previewing" and "what future
+// drawings use" are meaningfully different things).
+const RSI_LAYOUT_STORAGE_KEY = 'rsiLayout_v1';
+const RSI_LAYOUT_FACTORY_DEFAULT = { height: 150, position: 'bottom' };
+const RSI_MIN_HEIGHT = 80;
+const RSI_MAX_HEIGHT = 500;
+
+function loadRsiLayout() {
+  try {
+    const raw = localStorage.getItem(RSI_LAYOUT_STORAGE_KEY);
+    const saved = raw ? JSON.parse(raw) : null;
+    return Object.assign({}, RSI_LAYOUT_FACTORY_DEFAULT, saved);
+  } catch (e) {
+    return Object.assign({}, RSI_LAYOUT_FACTORY_DEFAULT);
+  }
+}
+
+let rsiLayout = loadRsiLayout();
+
+function persistRsiLayout() {
+  try {
+    localStorage.setItem(RSI_LAYOUT_STORAGE_KEY, JSON.stringify(rsiLayout));
+  } catch (e) {
+    // Best-effort, same as the other localStorage-backed settings here.
+  }
+}
+
+function applyRsiLayout() {
+  const rsiContainer = document.getElementById('rsi-chart-container');
+  if (!rsiContainer) return;
+  rsiContainer.style.height = rsiLayout.height + 'px';
+  rsiContainer.style.order = rsiLayout.position === 'top' ? '-1' : '0';
+  // The resize handle always sits on whichever edge borders the main
+  // chart, so dragging it always means "grow/shrink toward the main
+  // chart" regardless of whether RSI is docked at the top or bottom.
+  const handle = document.getElementById('rsi-resize-handle');
+  if (handle) {
+    if (rsiLayout.position === 'top') { handle.style.top = 'auto'; handle.style.bottom = '0'; }
+    else { handle.style.top = '0'; handle.style.bottom = 'auto'; }
+  }
+  if (rsiChart) {
+    rsiChart.applyOptions({ width: rsiChartEl.clientWidth, height: rsiChartEl.clientHeight });
+  }
+}
+
+// Drag-to-resize: mousedown on the handle, then track vertical mouse
+// movement to grow/shrink the RSI pane's height, clamped to a sane
+// range. Direction depends on which edge the handle is docked to (see
+// applyRsiLayout above) - dragging always feels like "pull this edge
+// toward/away from the main chart," whichever position RSI is in.
+(function setupRsiResize() {
+  const handle = document.getElementById('rsi-resize-handle');
+  if (!handle) return;
+  handle.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    const startY = e.clientY;
+    const startHeight = rsiLayout.height;
+    const onMove = (ev) => {
+      const dy = ev.clientY - startY;
+      const delta = rsiLayout.position === 'top' ? dy : -dy;
+      rsiLayout.height = Math.max(RSI_MIN_HEIGHT, Math.min(RSI_MAX_HEIGHT, startHeight + delta));
+      applyRsiLayout();
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      persistRsiLayout();
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  });
+})();
 
 let rsiUpperHandle = null, rsiLowerHandle = null, rsiMiddleHandle = null;
 
@@ -1213,30 +1300,31 @@ function applyRsiSettings() {
   if (rsiUpperHandle) { rsiSeries.removePriceLine(rsiUpperHandle); rsiUpperHandle = null; }
   if (rsiSettings.upper.enabled) {
     rsiUpperHandle = rsiSeries.createPriceLine({
-      price: rsiSettings.upper.value, color: rsiSettings.refLine.color,
-      lineWidth: rsiSettings.refLine.lineWidth, lineStyle: LINE_STYLE_MAP[rsiSettings.refLine.lineStyle],
-      axisLabelVisible: true, title: '',
-    });
-  }
-  if (rsiLowerHandle) { rsiSeries.removePriceLine(rsiLowerHandle); rsiLowerHandle = null; }
-  if (rsiSettings.lower.enabled) {
-    rsiLowerHandle = rsiSeries.createPriceLine({
-      price: rsiSettings.lower.value, color: rsiSettings.refLine.color,
-      lineWidth: rsiSettings.refLine.lineWidth, lineStyle: LINE_STYLE_MAP[rsiSettings.refLine.lineStyle],
+      price: rsiSettings.upper.value, color: rsiSettings.upper.color,
+      lineWidth: rsiSettings.upper.lineWidth, lineStyle: LINE_STYLE_MAP[rsiSettings.upper.lineStyle],
       axisLabelVisible: true, title: '',
     });
   }
   if (rsiMiddleHandle) { rsiSeries.removePriceLine(rsiMiddleHandle); rsiMiddleHandle = null; }
   if (rsiSettings.middle.enabled) {
     rsiMiddleHandle = rsiSeries.createPriceLine({
-      price: rsiSettings.middle.value, color: rsiSettings.refLine.color,
-      lineWidth: rsiSettings.refLine.lineWidth, lineStyle: LINE_STYLE_MAP[rsiSettings.refLine.lineStyle],
+      price: rsiSettings.middle.value, color: rsiSettings.middle.color,
+      lineWidth: rsiSettings.middle.lineWidth, lineStyle: LINE_STYLE_MAP[rsiSettings.middle.lineStyle],
+      axisLabelVisible: true, title: '',
+    });
+  }
+  if (rsiLowerHandle) { rsiSeries.removePriceLine(rsiLowerHandle); rsiLowerHandle = null; }
+  if (rsiSettings.lower.enabled) {
+    rsiLowerHandle = rsiSeries.createPriceLine({
+      price: rsiSettings.lower.value, color: rsiSettings.lower.color,
+      lineWidth: rsiSettings.lower.lineWidth, lineStyle: LINE_STYLE_MAP[rsiSettings.lower.lineStyle],
       axisLabelVisible: true, title: '',
     });
   }
 }
 
 function createRsiChart() {
+  applyRsiLayout();
   rsiChartEl.innerHTML = ''; // clean slate in case a previous instance left anything behind
   rsiChart = LightweightCharts.createChart(rsiChartEl, {
     layout: {
@@ -1873,12 +1961,13 @@ function renderRsiSettingsPanel() {
 
   const panel = document.createElement('div');
   panel.className = 'drawing-settings-panel rsi-settings-panel';
-  // Anchored within the spacious main chart area (this overlay's own
-  // parent), not the RSI pane - the RSI pane is only ~150px tall,
-  // nowhere near enough to fit this panel's full height without it
-  // running off the bottom of the page.
-  panel.style.top = '30px';
-  panel.style.right = '10px';
+  // Centered within the spacious main chart area (this overlay's own
+  // parent) - transform-based centering so it stays centered
+  // regardless of the panel's actual height (which varies now that
+  // each level has its own style controls).
+  panel.style.top = '50%';
+  panel.style.left = '50%';
+  panel.style.transform = 'translate(-50%, -50%)';
   panel.addEventListener('mousedown', (e) => e.stopPropagation());
   panel.addEventListener('click', (e) => e.stopPropagation());
 
@@ -1931,18 +2020,41 @@ function renderRsiSettingsPanel() {
     addRow('Line', styleSelect);
   }
 
+  addSectionHeader('Pane');
+  const positionRow = document.createElement('div');
+  positionRow.className = 'row';
+  const positionLabel = document.createElement('label');
+  positionLabel.textContent = 'Position';
+  positionRow.appendChild(positionLabel);
+  const positionSelect = document.createElement('select');
+  [['bottom', 'Bottom'], ['top', 'Top']].forEach(([v, label]) => {
+    const opt = document.createElement('option');
+    opt.value = v; opt.textContent = label;
+    if (v === rsiLayout.position) opt.selected = true;
+    positionSelect.appendChild(opt);
+  });
+  positionSelect.addEventListener('change', () => {
+    rsiLayout.position = positionSelect.value;
+    applyRsiLayout();
+    persistRsiLayout();
+  });
+  positionRow.appendChild(positionSelect);
+  panel.appendChild(positionRow);
+
   addSectionHeader('RSI Line');
   makeStyleRows(rsiSettings.line);
 
-  addSectionHeader('Reference Lines');
-  makeStyleRows(rsiSettings.refLine);
+  // Each level gets its own On/Off + threshold value, PLUS its own
+  // independent color/thickness/line-type - no longer a shared style
+  // across all three, so Upper/Middle/Lower can each look completely
+  // different if you want them to.
+  function addLevelSection(key, labelText) {
+    addSectionHeader(labelText);
 
-  addSectionHeader('Levels');
-  function addLevelRow(key, labelText) {
     const row = document.createElement('div');
     row.className = 'row';
     const label = document.createElement('label');
-    label.textContent = labelText;
+    label.textContent = 'On/Value';
     row.appendChild(label);
 
     const wrap = document.createElement('div');
@@ -1975,10 +2087,12 @@ function renderRsiSettingsPanel() {
     wrap.appendChild(valueInput);
     row.appendChild(wrap);
     panel.appendChild(row);
+
+    makeStyleRows(rsiSettings[key]);
   }
-  addLevelRow('upper', 'Upper');
-  addLevelRow('lower', 'Lower');
-  addLevelRow('middle', 'Middle');
+  addLevelSection('upper', 'Upper');
+  addLevelSection('middle', 'Middle');
+  addLevelSection('lower', 'Lower');
 
   const actionsRow = document.createElement('div');
   actionsRow.className = 'panel-actions-row';

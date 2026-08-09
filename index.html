@@ -738,7 +738,7 @@
       <div id="earnings-overlay"></div>
       <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">44</div>
+      <div id="build-number">45</div>
       <div id="main-no-data">No Data</div>
     </div>
     <div id="rsi-chart-container">
@@ -2062,7 +2062,24 @@ function renderSelectionOverlay() {
   container.innerHTML = '';
   if (!selectedDrawing) return;
 
+  // #drawing-overlay uses overflow:visible (so the style panel isn't
+  // clipped), but that means anything positioned outside the actual
+  // chart pane - a point scrolled off-screen, or a Ray's far edge -
+  // just renders wherever those coordinates land on the page: into the
+  // watchlist (negative x), the header/timeframe row (negative y), the
+  // price-axis label gutter (x past the plot), or the RSI pane below
+  // (y past the pane height), since nothing was clipping it. Every
+  // handle/button below is gated on this check instead of being
+  // trusted to land inside the pane.
+  const priceScaleWidth = chart.priceScale('right').width();
+  const maxX = chartEl.clientWidth - priceScaleWidth;
+  const maxY = chartEl.clientHeight;
+  function inBounds(x, y) {
+    return x !== null && y !== null && x >= 0 && x <= maxX && y >= 0 && y <= maxY;
+  }
+
   function makeHandle(x, y, onMove, extraClass) {
+    if (!inBounds(x, y)) return;
     const h = document.createElement('div');
     h.className = 'drawing-handle' + (extraClass ? ' ' + extraClass : '');
     h.style.left = x + 'px';
@@ -2086,7 +2103,6 @@ function renderSelectionOverlay() {
     const d = selectedDrawing.ref;
     const x1 = chart.timeScale().timeToCoordinate(d.time1);
     const y1 = series.priceToCoordinate(d.price1);
-    if (x1 === null || y1 === null) return;
     makeHandle(x1, y1, (ev) => {
       const { x, y } = screenToChartXY(ev);
       const t = chart.timeScale().coordinateToTime(x);
@@ -2109,18 +2125,16 @@ function renderSelectionOverlay() {
     if (d.type === 'trendline' || d.type === 'ray') {
       const x2 = chart.timeScale().timeToCoordinate(d.time2);
       const y2 = series.priceToCoordinate(d.price2);
-      if (x2 !== null && y2 !== null) {
-        makeHandle(x2, y2, (ev) => {
-          const { x, y } = screenToChartXY(ev);
-          const t = chart.timeScale().coordinateToTime(x);
-          const p = series.coordinateToPrice(y);
-          if (t === null || p === null) return;
-          if (timeToNumeric(t) === timeToNumeric(d.time1)) return;
-          d.time2 = t; d.price2 = p;
-          redrawShape(d);
-          renderSelectionOverlay();
-        });
-      }
+      makeHandle(x2, y2, (ev) => {
+        const { x, y } = screenToChartXY(ev);
+        const t = chart.timeScale().coordinateToTime(x);
+        const p = series.coordinateToPrice(y);
+        if (t === null || p === null) return;
+        if (timeToNumeric(t) === timeToNumeric(d.time1)) return;
+        d.time2 = t; d.price2 = p;
+        redrawShape(d);
+        renderSelectionOverlay();
+      });
     }
 
     const [rp1, rp2] = getAnchorPoints(d);
@@ -2130,30 +2144,31 @@ function renderSelectionOverlay() {
     const my2 = series.priceToCoordinate(rp2.value);
     if (mx1 !== null && my1 !== null && mx2 !== null && my2 !== null) {
       const midX = (mx1 + mx2) / 2, midY = (my1 + my2) / 2;
-      // Midpoint handle: drag to move the whole line as a unit rather
-      // than reshaping it from one end. Wired directly (not through
-      // makeHandle's onMove-per-mousemove pattern) since the drag needs
-      // the original mousedown event to compute a starting offset.
-      // Horizontal Ray only has one real point, so its own anchor
-      // handle above already does this job - skip the redundant
-      // overlapping handle here.
-      if (d.type !== 'hray') {
-        const moveHandle = document.createElement('div');
-        moveHandle.className = 'drawing-handle drawing-handle-move';
-        moveHandle.style.left = midX + 'px';
-        moveHandle.style.top = midY + 'px';
-        moveHandle.addEventListener('mousedown', (evt) => startTranslateDrag(d, evt));
-        container.appendChild(moveHandle);
-      }
+      if (inBounds(midX, midY)) {
+        // Midpoint handle: drag to move the whole line as a unit rather
+        // than reshaping it from one end. Wired directly (not through
+        // makeHandle's onMove-per-mousemove pattern) since the drag
+        // needs the original mousedown event to compute a starting
+        // offset. Horizontal Ray only has one real point, so its own
+        // anchor handle above already does this job - skip the
+        // redundant overlapping handle here.
+        if (d.type !== 'hray') {
+          const moveHandle = document.createElement('div');
+          moveHandle.className = 'drawing-handle drawing-handle-move';
+          moveHandle.style.left = midX + 'px';
+          moveHandle.style.top = midY + 'px';
+          moveHandle.addEventListener('mousedown', (evt) => startTranslateDrag(d, evt));
+          container.appendChild(moveHandle);
+        }
 
-      renderActionBar(container, midX, Math.min(my1, my2) - 4, d, 'shape');
+        const barY = Math.min(my1, my2) - 4;
+        if (inBounds(midX, barY)) renderActionBar(container, midX, barY, d, 'shape');
+      }
     }
   } else if (selectedDrawing.kind === 'hline') {
     const pl = selectedDrawing.ref;
     const y = series.priceToCoordinate(pl.price);
-    if (y === null) return;
-    const priceScaleWidth = chart.priceScale('right').width();
-    const midX = (chartEl.clientWidth - priceScaleWidth) / 2;
+    const midX = maxX / 2;
     makeHandle(midX, y, (ev) => {
       const { y: ny } = screenToChartXY(ev);
       const p = series.coordinateToPrice(ny);
@@ -2162,7 +2177,7 @@ function renderSelectionOverlay() {
       pl.lwcHandle.applyOptions({ price: p });
       renderSelectionOverlay();
     });
-    renderActionBar(container, midX, y - 4, pl, 'hline');
+    if (inBounds(midX, y - 4)) renderActionBar(container, midX, y - 4, pl, 'hline');
   }
 }
 

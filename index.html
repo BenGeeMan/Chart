@@ -738,7 +738,7 @@
       <div id="earnings-overlay"></div>
       <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">43</div>
+      <div id="build-number">44</div>
       <div id="main-no-data">No Data</div>
     </div>
     <div id="rsi-chart-container">
@@ -1532,6 +1532,22 @@ function timeToNumeric(t) {
 function extrapolatePrice(time1, price1, time2, price2, targetTime) {
   const t1 = timeToNumeric(time1), t2 = timeToNumeric(time2), tt = timeToNumeric(targetTime);
   if (t2 === t1) return price2;
+  // The main chart's price axis is logarithmic (see rightPriceScale's
+  // mode above), so a straight line on screen is straight in LOG(price)
+  // space, not raw price. Extrapolating with plain linear price math
+  // (as this used to) computes a mathematically correct straight line
+  // in the wrong space - the result draws straight on screen only
+  // between the anchor and the extrapolated edge (the only two points
+  // actually fed to the chart), but the real second click that defined
+  // the slope ends up visibly off that line, since raw-price-linear and
+  // log-price-linear are different curves. Doing the same interpolation
+  // in log space keeps every point - anchor, the real second click, and
+  // the extrapolated edge - genuinely colinear on screen.
+  if (price1 > 0 && price2 > 0) {
+    const lp1 = Math.log(price1), lp2 = Math.log(price2);
+    const slope = (lp2 - lp1) / (t2 - t1);
+    return Math.exp(lp1 + slope * (tt - t1));
+  }
   const slope = (price2 - price1) / (t2 - t1);
   return price1 + slope * (tt - t1);
 }

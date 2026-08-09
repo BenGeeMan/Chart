@@ -171,6 +171,27 @@
     height: 150px;
     border-top: 1px solid var(--panel-border);
   }
+  #rsi-draw-toolbar {
+    position: absolute;
+    top: 50%;
+    left: 0;
+    transform: translateY(-50%) scale(0.82);
+    transform-origin: left center;
+    z-index: 6;
+    display: flex;
+    flex-direction: column;
+    background: #ffffff;
+    border: 1px solid var(--panel-border);
+    border-left: none;
+    border-radius: 0 6px 6px 0;
+  }
+  #rsi-drawing-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 5;
+    pointer-events: none;
+    overflow: visible;
+  }
   #rsi-label {
     position: absolute;
     top: 4px;
@@ -738,10 +759,17 @@
       <div id="earnings-overlay"></div>
       <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">45</div>
+      <div id="build-number">46</div>
       <div id="main-no-data">No Data</div>
     </div>
     <div id="rsi-chart-container">
+      <div id="rsi-draw-toolbar">
+        <button class="draw-tool-btn active" data-tool="none" title="Cursor (select/pan)">⊙</button>
+        <button class="draw-tool-btn" data-tool="trendline" title="Trend Line">╱</button>
+        <button class="draw-tool-btn" data-tool="hline" title="Horizontal Line">—</button>
+        <button class="draw-tool-btn" data-tool="ray" title="Ray">↗</button>
+        <button class="draw-tool-btn" data-tool="hray" title="Horizontal Ray">⇥</button>
+      </div>
       <div id="rsi-label">RSI (14)</div>
       <div id="rsi-tf-buttons">
         <button class="rsi-tf-btn" data-tf="m5">5m</button>
@@ -753,6 +781,7 @@
         <button class="rsi-tf-btn" data-tf="quarterly">Q</button>
       </div>
       <div id="rsi-chart"></div>
+      <div id="rsi-drawing-overlay"></div>
       <div id="rsi-no-data">No Data</div>
     </div>
   </div>
@@ -1063,6 +1092,7 @@ function loadRsiData(tf) {
         return;
       }
       document.getElementById('rsi-no-data').classList.remove('show');
+      rsiBarsData = data;
       rsiSeries.setData(calculateRSI(data, 14));
       if (tf === currentTF) {
         const mainRange = chart.timeScale().getVisibleLogicalRange();
@@ -1129,8 +1159,6 @@ const TIMEFRAME_META = {
 
 let markers = [];
 let crossoverMarkers = [];
-let priceLines = [];
-let userDrawings = []; // { type: 'trendline'|'ray'|'hray', time1, price1, time2, price2, color, source, series }
 let watchlistData = [];
 let currentVolumeEma3 = [];
 let currentVolumeEma20 = [];
@@ -1306,12 +1334,7 @@ function loadTimeframe(tf) {
       renderEarningsOverlay();
       positionDailyBox();
       refreshMarkers();
-      for (const pl of priceLines) series.removePriceLine(pl.lwcHandle);
-      priceLines = [];
-      for (const d of userDrawings) if (d.series) chart.removeSeries(d.series);
-      userDrawings = [];
-      selectedDrawing = null;
-      document.getElementById('drawing-overlay').innerHTML = '';
+      mainPane.clearAllDrawings();
       updateOutputBox();
 
       document.querySelectorAll('.tf-btn').forEach(b => b.classList.toggle('active', b.dataset.tf === tf));
@@ -1489,8 +1512,16 @@ function setRsiEnabled(enabled) {
   document.getElementById('rsi-chart-container').classList.toggle('hidden', !enabled);
   chart.applyOptions({ width: chartEl.clientWidth, height: chartEl.clientHeight });
   if (enabled) {
-    requestAnimationFrame(() => createRsiChart());
+    // createRsiChart() creates rsiChart/rsiSeries synchronously (the
+    // only async part is the price-data fetch inside loadRsiData at
+    // its end), so rsiPane.attach() can safely wire up to them right
+    // after createRsiChart() returns.
+    requestAnimationFrame(() => { createRsiChart(); rsiPane.attach(); });
   } else if (rsiChart) {
+    // Clear rsiPane's own bookkeeping/overlay BEFORE the chart itself
+    // is destroyed - the series/handles it references are about to be
+    // removed wholesale by rsiChart.remove() anyway.
+    rsiPane.reset();
     rsiChart.remove();
     rsiChart = null;
     rsiSeries = null;
@@ -1524,26 +1555,34 @@ function parseAttrs(rest) {
 // always extends rightward, matching the usual "project forward"
 // convention; a regular Ray extends in whichever direction its second
 // point implies, preserving the original slope via extrapolation.
+//
+// EVERYTHING BELOW is written to work against ANY chart pane, not just
+// the main chart - createDrawingPane() is a self-contained factory that
+// takes a small config (how to get the chart/series/container for a
+// pane, its own bars array, whether its price scale is logarithmic) and
+// returns a fully working set of drawing tools for that pane: its own
+// toolbar, its own selection state, its own drawings. mainPane and
+// rsiPane below are two instances of the exact same code. To add
+// drawing tools to a future indicator pane, create its own toolbar +
+// overlay <div> in the HTML (copy #rsi-draw-toolbar/#rsi-drawing-overlay
+// as a template), then call createDrawingPane({...}) for it the same
+// way rsiPane is set up - no changes needed to this factory itself.
 
 function timeToNumeric(t) {
   return typeof t === 'number' ? t : Math.floor(new Date(t + 'T00:00:00Z').getTime() / 1000);
 }
 
-function extrapolatePrice(time1, price1, time2, price2, targetTime) {
+function extrapolatePrice(time1, price1, time2, price2, targetTime, isLog) {
   const t1 = timeToNumeric(time1), t2 = timeToNumeric(time2), tt = timeToNumeric(targetTime);
   if (t2 === t1) return price2;
-  // The main chart's price axis is logarithmic (see rightPriceScale's
-  // mode above), so a straight line on screen is straight in LOG(price)
-  // space, not raw price. Extrapolating with plain linear price math
-  // (as this used to) computes a mathematically correct straight line
-  // in the wrong space - the result draws straight on screen only
-  // between the anchor and the extrapolated edge (the only two points
-  // actually fed to the chart), but the real second click that defined
-  // the slope ends up visibly off that line, since raw-price-linear and
-  // log-price-linear are different curves. Doing the same interpolation
-  // in log space keeps every point - anchor, the real second click, and
-  // the extrapolated edge - genuinely colinear on screen.
-  if (price1 > 0 && price2 > 0) {
+  // A straight line on a LOGARITHMIC price scale is straight in
+  // LOG(price) space, not raw price - extrapolating with plain linear
+  // price math computes a mathematically correct straight line in the
+  // wrong space, so points that should lie on it (like the real second
+  // click that defined the slope) end up visibly off it. isLog is
+  // false for panes like RSI that use a normal linear 0-100 scale,
+  // where plain linear math is already correct.
+  if (isLog && price1 > 0 && price2 > 0) {
     const lp1 = Math.log(price1), lp2 = Math.log(price2);
     const slope = (lp2 - lp1) / (t2 - t1);
     return Math.exp(lp1 + slope * (tt - t1));
@@ -1553,7 +1592,8 @@ function extrapolatePrice(time1, price1, time2, price2, targetTime) {
 }
 
 // --- Style helpers shared by the settings panel (color/transparency/
-// thickness/line-type) added below. ---
+// thickness/line-type) added below. Pane-agnostic: they only touch the
+// drawing/priceLine data objects passed in, never a chart directly. ---
 function colorWithOpacity(hex, opacity) {
   const m = /^#([0-9a-f]{6})$/i.exec(hex || '');
   if (!m) return hex;
@@ -1579,21 +1619,37 @@ const LINE_STYLE_MAP = {
 
 // Returns the two rendered {time, value} endpoints for a shape - for
 // Ray/Horizontal Ray this includes the same edge-extrapolation used at
-// render time, so selection handles and hit-testing always line up with
-// what's actually drawn on screen. Note: for Ray, the SECOND handle is
-// placed at the shape's real, stored, editable point (time2/price2) -
-// the point that defines the ray's slope - not at the rendered far edge,
-// since the edge is just a derived extension and dragging it directly
-// wouldn't map back to a meaningful stored value.
+// render time, so hit-testing always lines up with what's actually
+// drawn. `bars` is the pane's own bars array (main chart vs RSI can be
+// showing different timeframes with different data).
+function getShapePoints(drawing, bars, isLog) {
+  let p1, p2;
+  if (drawing.type === 'trendline') {
+    p1 = { time: drawing.time1, value: drawing.price1 };
+    p2 = { time: drawing.time2, value: drawing.price2 };
+  } else if (drawing.type === 'ray') {
+    const goingRight = timeToNumeric(drawing.time2) >= timeToNumeric(drawing.time1);
+    const edgeTime = bars.length ? (goingRight ? bars[bars.length - 1].time : bars[0].time) : drawing.time2;
+    const edgePrice = extrapolatePrice(drawing.time1, drawing.price1, drawing.time2, drawing.price2, edgeTime, isLog);
+    p1 = { time: drawing.time1, value: drawing.price1 };
+    p2 = { time: edgeTime, value: edgePrice };
+  } else if (drawing.type === 'hray') {
+    const edgeTime = bars.length ? bars[bars.length - 1].time : drawing.time1;
+    p1 = { time: drawing.time1, value: drawing.price1 };
+    p2 = { time: edgeTime, value: drawing.price1 };
+  }
+  return [p1, p2].sort((a, b) => timeToNumeric(a.time) - timeToNumeric(b.time));
+}
+
 // Like getShapePoints, but always returns the shape's REAL, directly-
 // stored points rather than any auto-extrapolated edge. Used only to
 // position selection UI (the move handle, Style/Delete toolbar) - a
 // steep Ray's extrapolated edge can land at a price way outside the
 // visible chart even though the ray itself correctly draws out to it,
-// which was putting those controls far off in empty space ("a strange
-// dot above the line"). The user's actual two clicks are always
-// somewhere near the visible chart, so anchoring UI to those instead
-// keeps it sane regardless of how steep/far the ray extends.
+// which was putting those controls far off in empty space. The user's
+// actual two clicks are always somewhere near the visible chart, so
+// anchoring UI to those instead keeps it sane regardless of how
+// steep/far the ray extends. Pane-agnostic - no bars needed.
 function getAnchorPoints(drawing) {
   if (drawing.type === 'hray') {
     return [{ time: drawing.time1, value: drawing.price1 }, { time: drawing.time1, value: drawing.price1 }];
@@ -1604,45 +1660,19 @@ function getAnchorPoints(drawing) {
   ].sort((a, b) => timeToNumeric(a.time) - timeToNumeric(b.time));
 }
 
-function getShapePoints(drawing) {
-  let p1, p2;
-  if (drawing.type === 'trendline') {
-    p1 = { time: drawing.time1, value: drawing.price1 };
-    p2 = { time: drawing.time2, value: drawing.price2 };
-  } else if (drawing.type === 'ray') {
-    const goingRight = timeToNumeric(drawing.time2) >= timeToNumeric(drawing.time1);
-    const edgeTime = barsData.length ? (goingRight ? barsData[barsData.length - 1].time : barsData[0].time) : drawing.time2;
-    const edgePrice = extrapolatePrice(drawing.time1, drawing.price1, drawing.time2, drawing.price2, edgeTime);
-    p1 = { time: drawing.time1, value: drawing.price1 };
-    p2 = { time: edgeTime, value: edgePrice };
-  } else if (drawing.type === 'hray') {
-    const edgeTime = barsData.length ? barsData[barsData.length - 1].time : drawing.time1;
-    p1 = { time: drawing.time1, value: drawing.price1 };
-    p2 = { time: edgeTime, value: drawing.price1 };
-  }
-  return [p1, p2].sort((a, b) => timeToNumeric(a.time) - timeToNumeric(b.time));
+// --- Distance from a point to a line segment, in pixel space - used to
+// hit-test clicks against already-drawn shapes. Pane-agnostic. ---
+function distToSegment(px, py, x1, y1, x2, y2) {
+  const dx = x2 - x1, dy = y2 - y1;
+  const lenSq = dx * dx + dy * dy;
+  let t = lenSq === 0 ? 0 : ((px - x1) * dx + (py - y1) * dy) / lenSq;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy));
 }
 
-function renderDrawing(drawing) {
-  const lineSeries = chart.addLineSeries({
-    color: colorWithOpacity(drawing.color, drawing.opacity != null ? drawing.opacity : 1),
-    lineWidth: drawing.lineWidth || 2,
-    lineStyle: LINE_STYLE_MAP[drawing.lineStyle || 'solid'],
-    priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
-    // Excludes this series from the right price scale's auto-fit
-    // computation - repeatedly recomputing autoscale on every setData()
-    // call is the other documented trigger for this library's
-    // "Maximum call stack size exceeded" crash, alongside the same-bar
-    // issue guarded against elsewhere in this file.
-    autoscaleInfoProvider: () => null,
-  });
-  lineSeries.setData(getShapePoints(drawing));
-  drawing.series = lineSeries;
-}
-
-// Cheap style-only update (color/opacity/thickness/line-type) via the
-// series' own applyOptions - no need to remove/recreate the series the
-// way redrawShape does for actual point changes.
+// Cheap style-only updates (color/opacity/thickness/line-type) via each
+// object's own stored series/priceLine handle - pane-agnostic, since
+// the handle itself already belongs to whichever chart created it.
 function applyShapeStyle(d) {
   if (!d.series) return;
   d.series.applyOptions({
@@ -1660,246 +1690,9 @@ function applyHlineStyle(pl) {
   });
 }
 
-function addUserDrawing(type, time1, price1, time2, price2, color, source) {
-  const drawing = {
-    type, time1, price1, time2, price2, color, source,
-    opacity: 1, lineWidth: 2, lineStyle: 'solid',
-  };
-  renderDrawing(drawing);
-  userDrawings.push(drawing);
-  updateOutputBox();
-  return drawing;
-}
-
-// Click-to-draw interaction. Trend Line and Ray need two clicks (anchor,
-// then endpoint); Horizontal Line and Horizontal Ray only need one,
-// since their second coordinate is implied. After completing a shape,
-// the tool automatically deselects back to the cursor.
-//
-// While a Trend Line / Ray is mid-draw (one point placed, waiting on the
-// second), a dashed preview line follows the mouse via previewSeries -
-// pointMarkersVisible gives a visible dot at both the anchor and the
-// live end, so it's clear where the line will land before the second
-// click commits it.
-let activeDrawTool = 'none';
-let pendingDrawPoint = null;
-let previewSeries = null;
-
-// Selection state for editing an already-drawn shape/line: which one is
-// selected, and (while a handle is being dragged) the in-progress drag.
-// { kind: 'shape', ref: <userDrawings item> } or { kind: 'hline', ref: <priceLines item> }
-let selectedDrawing = null;
-
-function screenToChartXY(evt) {
-  const rect = chartEl.getBoundingClientRect();
-  return { x: evt.clientX - rect.left, y: evt.clientY - rect.top };
-}
-
-function cancelPendingDraw() {
-  if (previewRafId !== null) { cancelAnimationFrame(previewRafId); previewRafId = null; }
-  previewRafData = null;
-  if (previewSeries) { chart.removeSeries(previewSeries); previewSeries = null; }
-  pendingDrawPoint = null;
-}
-
-function setActiveDrawTool(tool) {
-  cancelPendingDraw();
-  activeDrawTool = tool;
-  document.querySelectorAll('.draw-tool-btn').forEach(b => b.classList.toggle('active', b.dataset.tool === tool));
-  if (tool !== 'none') selectDrawing(null);
-}
-
-document.querySelectorAll('.draw-tool-btn').forEach(btn => {
-  btn.addEventListener('click', () => setActiveDrawTool(btn.dataset.tool));
-});
-
-// Cancel an in-progress draw or clear a selection without hunting for
-// the cursor button. Delete/Backspace removes the selected drawing -
-// guarded against firing while focus is in a text field (the paste
-// modal, or an input inside the style panel) so it doesn't eat normal
-// typing/editing there.
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') {
-    if (activeDrawTool !== 'none') setActiveDrawTool('none');
-    else if (selectedDrawing) selectDrawing(null);
-    return;
-  }
-  if ((e.key === 'Delete' || e.key === 'Backspace') && selectedDrawing) {
-    const tag = document.activeElement && document.activeElement.tagName;
-    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-    e.preventDefault();
-    deleteSelectedDrawing();
-  }
-});
-
-// Throttles preview-line updates to once per animation frame. Calling
-// setData() synchronously on every single crosshairMove event turned out
-// to be its own trigger for the library's stack-overflow bug (separate
-// from the same-bar issue guarded against below) - deferring the actual
-// update via requestAnimationFrame breaks that re-entrant chain, since
-// it always runs in a fresh task rather than nested inside the event
-// that triggered it.
-let previewRafId = null;
-let previewRafData = null;
-
-function flushPreview() {
-  previewRafId = null;
-  if (!previewSeries || !pendingDrawPoint || !previewRafData) return;
-  const pts = [
-    { time: pendingDrawPoint.time, value: pendingDrawPoint.price },
-    { time: previewRafData.time, value: previewRafData.price },
-  ].sort((a, b) => timeToNumeric(a.time) - timeToNumeric(b.time));
-  previewSeries.setData(pts);
-}
-
-chart.subscribeCrosshairMove(param => {
-  if (!pendingDrawPoint || !previewSeries) return;
-  if (!param.point || !param.time) return;
-  // Two points on the SAME bar crash this charting library outright
-  // (infinite recursion inside its own auto-scale code - a real,
-  // confirmed bug, not a guess). Since the mouse always passes back
-  // over the anchor's own bar right after the first click, just skip
-  // that frame and keep showing the last valid preview instead of
-  // feeding it a degenerate two-point-same-time line.
-  if (timeToNumeric(param.time) === timeToNumeric(pendingDrawPoint.time)) return;
-  const price = series.coordinateToPrice(param.point.y);
-  if (price === null) return;
-  previewRafData = { time: param.time, price };
-  if (previewRafId === null) previewRafId = requestAnimationFrame(flushPreview);
-});
-
-// --- Distance from a point to a line segment, in pixel space - used to
-// hit-test clicks against already-drawn shapes when the cursor tool is
-// active, so clicking near a line selects it. ---
-function distToSegment(px, py, x1, y1, x2, y2) {
-  const dx = x2 - x1, dy = y2 - y1;
-  const lenSq = dx * dx + dy * dy;
-  let t = lenSq === 0 ? 0 : ((px - x1) * dx + (py - y1) * dy) / lenSq;
-  t = Math.max(0, Math.min(1, t));
-  return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy));
-}
-
-function findDrawingAt(x, y) {
-  const HIT = 6;
-  for (const d of userDrawings) {
-    const [p1, p2] = getShapePoints(d);
-    const x1 = chart.timeScale().timeToCoordinate(p1.time);
-    const y1 = series.priceToCoordinate(p1.value);
-    const x2 = chart.timeScale().timeToCoordinate(p2.time);
-    const y2 = series.priceToCoordinate(p2.value);
-    if (x1 === null || y1 === null || x2 === null || y2 === null) continue;
-    if (distToSegment(x, y, x1, y1, x2, y2) <= HIT) return { kind: 'shape', ref: d };
-  }
-  for (const pl of priceLines) {
-    const y1 = series.priceToCoordinate(pl.price);
-    if (y1 === null) continue;
-    if (Math.abs(y - y1) <= HIT) return { kind: 'hline', ref: pl };
-  }
-  return null;
-}
-
-// Selection is now indicated purely by the handles/toolbar (below),
-// not by temporarily thickening the line - now that there's a real
-// style panel, showing the line at its exact configured thickness at
-// all times is less confusing (what-you-see-is-what-you-get).
-let settingsPanelOpen = false;
-
-function selectDrawing(sel) {
-  selectedDrawing = sel;
-  settingsPanelOpen = false;
-  renderSelectionOverlay();
-}
-
-function redrawShape(drawing) {
-  if (drawing.series) chart.removeSeries(drawing.series);
-  renderDrawing(drawing);
-}
-
-// Finds the bar index for a given time, so dragging can move a shape by
-// a whole number of bars (snapping to real candles) rather than by raw
-// pixel/time math, which would drift off the actual data.
-function findBarIndex(t) {
-  const tn = timeToNumeric(t);
-  return barsData.findIndex(b => timeToNumeric(b.time) === tn);
-}
-
-// Drag-to-move for the midpoint handle: translates every point of the
-// shape by the same bar-offset and price-offset as the mouse, so the
-// whole line moves as a unit while keeping its length/slope.
-function startTranslateDrag(d, evt) {
-  evt.preventDefault();
-  evt.stopPropagation();
-  const startXY = screenToChartXY(evt);
-  const startTime = chart.timeScale().coordinateToTime(startXY.x);
-  const startPrice = series.coordinateToPrice(startXY.y);
-  if (startTime === null || startPrice === null) return;
-  const startBarIdx = findBarIndex(startTime);
-  if (startBarIdx === -1) return;
-
-  const origTime1 = d.time1, origPrice1 = d.price1, origBarIdx1 = findBarIndex(d.time1);
-  const origTime2 = d.time2, origPrice2 = d.price2;
-  const origBarIdx2 = d.type !== 'hray' && d.time2 != null ? findBarIndex(d.time2) : null;
-
-  const onMove = (ev) => {
-    const { x, y } = screenToChartXY(ev);
-    const t = chart.timeScale().coordinateToTime(x);
-    const p = series.coordinateToPrice(y);
-    if (t === null || p === null) return;
-    const curBarIdx = findBarIndex(t);
-    if (curBarIdx === -1) return;
-    const barDelta = curBarIdx - startBarIdx;
-    const priceDelta = p - startPrice;
-
-    if (origBarIdx1 !== -1 && barsData[origBarIdx1 + barDelta]) {
-      d.time1 = barsData[origBarIdx1 + barDelta].time;
-      d.price1 = origPrice1 + priceDelta;
-    }
-    if (origBarIdx2 !== null && origBarIdx2 !== -1 && barsData[origBarIdx2 + barDelta]) {
-      d.time2 = barsData[origBarIdx2 + barDelta].time;
-      d.price2 = origPrice2 + priceDelta;
-    } else if (d.type === 'hray') {
-      // hray only stores one point - price moves freely, but keep the
-      // shape identical if the bar offset couldn't be applied.
-    }
-    redrawShape(d);
-    renderSelectionOverlay();
-  };
-  const onUp = () => {
-    document.removeEventListener('mousemove', onMove);
-    document.removeEventListener('mouseup', onUp);
-    updateOutputBox();
-  };
-  document.addEventListener('mousemove', onMove);
-  document.addEventListener('mouseup', onUp);
-}
-
-function deleteSelectedDrawing() {
-  if (!selectedDrawing) return;
-  if (selectedDrawing.kind === 'shape') {
-    const idx = userDrawings.indexOf(selectedDrawing.ref);
-    if (idx !== -1) {
-      if (selectedDrawing.ref.series) chart.removeSeries(selectedDrawing.ref.series);
-      userDrawings.splice(idx, 1);
-    }
-  } else if (selectedDrawing.kind === 'hline') {
-    const idx = priceLines.indexOf(selectedDrawing.ref);
-    if (idx !== -1) {
-      series.removePriceLine(selectedDrawing.ref.lwcHandle);
-      priceLines.splice(idx, 1);
-    }
-  }
-  selectedDrawing = null;
-  settingsPanelOpen = false;
-  document.getElementById('drawing-overlay').innerHTML = '';
-  updateOutputBox();
-  setStatus('Drawing deleted.', false);
-}
-
 // Renders the color/opacity/thickness/line-type panel for whichever
-// drawing is selected. `target` is the userDrawings item or priceLines
-// item itself; `kind` is 'shape' or 'hline' since they're styled via
-// different Lightweight Charts APIs (series.applyOptions vs
-// priceLine.applyOptions).
+// drawing is selected. Pane-agnostic - `target` carries its own
+// series/priceLine handle, and `kind` says which applyXStyle to use.
 function renderStylePanel(container, x, y, target, kind) {
   const panel = document.createElement('div');
   panel.className = 'drawing-settings-panel';
@@ -2022,221 +1815,568 @@ function renderStylePanel(container, x, y, target, kind) {
   container.appendChild(panel);
 }
 
-// Renders the small floating toolbar (⚙ Style, 🗑 Delete) for the
-// current selection, and the style panel underneath it if open.
-function renderActionBar(container, x, y, target, kind) {
-  const bar = document.createElement('div');
-  bar.className = 'drawing-toolbar-float';
-  bar.style.left = x + 'px';
-  bar.style.top = y + 'px';
+// Full drawing-tools controller for one chart pane. cfg:
+//   getChart()        - returns the pane's current chart instance
+//   getSeries()        - returns the pane's own price series
+//   getContainerEl()   - returns the pane's own container div (for
+//                        getBoundingClientRect/clientWidth/clientHeight)
+//   getBars()          - returns the pane's own current bars array
+//   overlayId          - id of this pane's selection-overlay <div>
+//   toolbarSelector    - CSS selector for this pane's toolbar buttons
+//   isLog              - whether this pane's price scale is logarithmic
+//                        (main chart: rightPriceScale.mode is
+//                        PriceScaleMode.Logarithmic, so isLog: true;
+//                        RSI: a plain 0-100 linear scale, isLog: false)
+//
+// isLog is NOT auto-detected from the chart's own options - it's a
+// hardcoded assumption baked into each createDrawingPane({...}) call
+// below. If a pane's price-scale mode is EVER changed (e.g. the main
+// chart's rightPriceScale.mode gets switched from Logarithmic to
+// Normal/linear, or vice versa for RSI), its isLog value here must be
+// updated to match, or two things will be visibly wrong: Ray's
+// extrapolated edge won't be genuinely colinear with the real click
+// points (extrapolatePrice), and dragging a shape via its midpoint
+// move-handle will distort its slope/angle (startTranslateDrag) - both
+// are the same category of bug that was hunted down and fixed earlier
+// in this file's history (see extrapolatePrice's own comment).
+// Every chart-instance reference goes through the getters above rather
+// than being captured once, so a pane whose chart gets destroyed and
+// recreated (like RSI, toggled on/off) keeps working correctly after
+// attach() is called again on the new instance.
+function createDrawingPane(cfg) {
+  let activeDrawTool = 'none';
+  let pendingDrawPoint = null;
+  let previewSeries = null;
+  let previewRafId = null;
+  let previewRafData = null;
+  let selectedDrawing = null;
+  let settingsPanelOpen = false;
+  const userDrawings = [];
+  const priceLines = [];
 
-  const settingsBtn = document.createElement('button');
-  settingsBtn.textContent = '⚙ Style';
-  settingsBtn.addEventListener('mousedown', (e) => e.stopPropagation());
-  settingsBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    settingsPanelOpen = !settingsPanelOpen;
-    renderSelectionOverlay();
-  });
-  bar.appendChild(settingsBtn);
-
-  const delBtn = document.createElement('button');
-  delBtn.textContent = '🗑 Delete';
-  delBtn.addEventListener('mousedown', (e) => e.stopPropagation());
-  delBtn.addEventListener('click', (e) => { e.stopPropagation(); deleteSelectedDrawing(); });
-  bar.appendChild(delBtn);
-
-  container.appendChild(bar);
-
-  if (settingsPanelOpen) renderStylePanel(container, x, y + 34, target, kind);
-}
-
-// Renders the selection handles (draggable circles at each editable
-// point) and the floating "Delete" button for whichever drawing is
-// currently selected. Plain HTML positioned via the chart's own
-// time/price-to-coordinate conversion (see the #drawing-overlay CSS
-// comment) - called on selection change, on drag, and whenever the
-// visible range changes (pan/zoom/resize) so handles track the chart.
-function renderSelectionOverlay() {
-  const container = document.getElementById('drawing-overlay');
-  container.innerHTML = '';
-  if (!selectedDrawing) return;
-
-  // #drawing-overlay uses overflow:visible (so the style panel isn't
-  // clipped), but that means anything positioned outside the actual
-  // chart pane - a point scrolled off-screen, or a Ray's far edge -
-  // just renders wherever those coordinates land on the page: into the
-  // watchlist (negative x), the header/timeframe row (negative y), the
-  // price-axis label gutter (x past the plot), or the RSI pane below
-  // (y past the pane height), since nothing was clipping it. Every
-  // handle/button below is gated on this check instead of being
-  // trusted to land inside the pane.
-  const priceScaleWidth = chart.priceScale('right').width();
-  const maxX = chartEl.clientWidth - priceScaleWidth;
-  const maxY = chartEl.clientHeight;
-  function inBounds(x, y) {
-    return x !== null && y !== null && x >= 0 && x <= maxX && y >= 0 && y <= maxY;
+  function screenToChartXY(evt) {
+    const rect = cfg.getContainerEl().getBoundingClientRect();
+    return { x: evt.clientX - rect.left, y: evt.clientY - rect.top };
   }
 
-  function makeHandle(x, y, onMove, extraClass) {
-    if (!inBounds(x, y)) return;
-    const h = document.createElement('div');
-    h.className = 'drawing-handle' + (extraClass ? ' ' + extraClass : '');
-    h.style.left = x + 'px';
-    h.style.top = y + 'px';
-    h.addEventListener('mousedown', (evt) => {
-      evt.preventDefault();
-      evt.stopPropagation();
-      const move = (ev) => onMove(ev);
-      const up = () => {
-        document.removeEventListener('mousemove', move);
-        document.removeEventListener('mouseup', up);
-        updateOutputBox();
-      };
-      document.addEventListener('mousemove', move);
-      document.addEventListener('mouseup', up);
+  function findBarIndex(t) {
+    const tn = timeToNumeric(t);
+    return cfg.getBars().findIndex(b => timeToNumeric(b.time) === tn);
+  }
+
+  function renderDrawing(drawing) {
+    const lineSeries = cfg.getChart().addLineSeries({
+      color: colorWithOpacity(drawing.color, drawing.opacity != null ? drawing.opacity : 1),
+      lineWidth: drawing.lineWidth || 2,
+      lineStyle: LINE_STYLE_MAP[drawing.lineStyle || 'solid'],
+      priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
+      // Excludes this series from the price scale's auto-fit
+      // computation - repeatedly recomputing autoscale on every
+      // setData() call is a documented trigger for this library's
+      // "Maximum call stack size exceeded" crash.
+      autoscaleInfoProvider: () => null,
     });
-    container.appendChild(h);
+    lineSeries.setData(getShapePoints(drawing, cfg.getBars(), cfg.isLog));
+    drawing.series = lineSeries;
   }
 
-  if (selectedDrawing.kind === 'shape') {
-    const d = selectedDrawing.ref;
-    const x1 = chart.timeScale().timeToCoordinate(d.time1);
-    const y1 = series.priceToCoordinate(d.price1);
-    makeHandle(x1, y1, (ev) => {
+  function addUserDrawing(type, time1, price1, time2, price2, color, source) {
+    const drawing = {
+      type, time1, price1, time2, price2, color, source,
+      opacity: 1, lineWidth: 2, lineStyle: 'solid',
+    };
+    renderDrawing(drawing);
+    userDrawings.push(drawing);
+    updateOutputBox();
+    return drawing;
+  }
+
+  function addHline(price, colorName, label, source, lineWidth, lineStyle) {
+    lineWidth = lineWidth || 2;
+    lineStyle = lineStyle || 'solid';
+    const colorHex = colorMap[colorName] || '#2962ff';
+    const handle = cfg.getSeries().createPriceLine({
+      price, color: colorHex, lineWidth, lineStyle: LINE_STYLE_MAP[lineStyle],
+      axisLabelVisible: true, title: label || '',
+    });
+    const pl = {
+      price, color: colorName || 'blue', colorHex, opacity: 1, lineWidth, lineStyle,
+      label: label || '', lwcHandle: handle, source,
+    };
+    priceLines.push(pl);
+    updateOutputBox();
+    return pl;
+  }
+
+  function cancelPendingDraw() {
+    if (previewRafId !== null) { cancelAnimationFrame(previewRafId); previewRafId = null; }
+    previewRafData = null;
+    if (previewSeries) { cfg.getChart().removeSeries(previewSeries); previewSeries = null; }
+    pendingDrawPoint = null;
+  }
+
+  function setActiveDrawTool(tool) {
+    cancelPendingDraw();
+    activeDrawTool = tool;
+    document.querySelectorAll(cfg.toolbarSelector).forEach(b => b.classList.toggle('active', b.dataset.tool === tool));
+    if (tool !== 'none') selectDrawing(null);
+  }
+
+  function selectDrawing(sel) {
+    selectedDrawing = sel;
+    settingsPanelOpen = false;
+    renderSelectionOverlay();
+  }
+
+  function redrawShape(drawing) {
+    if (drawing.series) cfg.getChart().removeSeries(drawing.series);
+    renderDrawing(drawing);
+  }
+
+  // Drag-to-move for the midpoint handle: translates every point of the
+  // shape by the same bar-offset (snapped to real bars) and price
+  // ratio (not a raw additive delta - see the isLog comment on
+  // extrapolatePrice above for why a ratio is needed to keep the
+  // visual angle constant on a logarithmic pane).
+  function startTranslateDrag(d, evt) {
+    evt.preventDefault();
+    evt.stopPropagation();
+    const series = cfg.getSeries();
+    const startXY = screenToChartXY(evt);
+    const startTime = cfg.getChart().timeScale().coordinateToTime(startXY.x);
+    const startPrice = series.coordinateToPrice(startXY.y);
+    if (startTime === null || startPrice === null || (cfg.isLog && startPrice <= 0)) return;
+    const startBarIdx = findBarIndex(startTime);
+    if (startBarIdx === -1) return;
+
+    const origPrice1 = d.price1, origBarIdx1 = findBarIndex(d.time1);
+    const origPrice2 = d.price2;
+    const origBarIdx2 = d.type !== 'hray' && d.time2 != null ? findBarIndex(d.time2) : null;
+
+    const onMove = (ev) => {
+      const bars = cfg.getBars();
       const { x, y } = screenToChartXY(ev);
-      const t = chart.timeScale().coordinateToTime(x);
+      const t = cfg.getChart().timeScale().coordinateToTime(x);
       const p = series.coordinateToPrice(y);
-      if (t === null || p === null) return;
-      // Same same-bar crash risk as the live preview (see comment
-      // above chart.subscribeCrosshairMove) - refuse a drag position
-      // that would land on the other point's bar.
-      if (d.type === 'hray') {
-        const edgeTime = barsData.length ? barsData[barsData.length - 1].time : null;
-        if (edgeTime !== null && timeToNumeric(t) === timeToNumeric(edgeTime)) return;
-      } else if (timeToNumeric(t) === timeToNumeric(d.time2)) {
-        return;
+      if (t === null || p === null || (cfg.isLog && p <= 0)) return;
+      const curBarIdx = findBarIndex(t);
+      if (curBarIdx === -1) return;
+      const barDelta = curBarIdx - startBarIdx;
+      const priceDelta = p - startPrice;
+      const priceRatio = cfg.isLog ? p / startPrice : null;
+
+      if (origBarIdx1 !== -1 && bars[origBarIdx1 + barDelta]) {
+        d.time1 = bars[origBarIdx1 + barDelta].time;
+        d.price1 = cfg.isLog ? origPrice1 * priceRatio : origPrice1 + priceDelta;
       }
-      d.time1 = t; d.price1 = p;
+      if (origBarIdx2 !== null && origBarIdx2 !== -1 && bars[origBarIdx2 + barDelta]) {
+        d.time2 = bars[origBarIdx2 + barDelta].time;
+        d.price2 = cfg.isLog ? origPrice2 * priceRatio : origPrice2 + priceDelta;
+      }
       redrawShape(d);
       renderSelectionOverlay();
-    });
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      updateOutputBox();
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  }
 
-    if (d.type === 'trendline' || d.type === 'ray') {
-      const x2 = chart.timeScale().timeToCoordinate(d.time2);
-      const y2 = series.priceToCoordinate(d.price2);
-      makeHandle(x2, y2, (ev) => {
+  function deleteSelectedDrawing() {
+    if (!selectedDrawing) return;
+    const chart = cfg.getChart(), series = cfg.getSeries();
+    if (selectedDrawing.kind === 'shape') {
+      const idx = userDrawings.indexOf(selectedDrawing.ref);
+      if (idx !== -1) {
+        if (selectedDrawing.ref.series) chart.removeSeries(selectedDrawing.ref.series);
+        userDrawings.splice(idx, 1);
+      }
+    } else if (selectedDrawing.kind === 'hline') {
+      const idx = priceLines.indexOf(selectedDrawing.ref);
+      if (idx !== -1) {
+        series.removePriceLine(selectedDrawing.ref.lwcHandle);
+        priceLines.splice(idx, 1);
+      }
+    }
+    selectedDrawing = null;
+    settingsPanelOpen = false;
+    const el = document.getElementById(cfg.overlayId);
+    if (el) el.innerHTML = '';
+    updateOutputBox();
+    setStatus('Drawing deleted.', false);
+  }
+
+  function findDrawingAt(x, y) {
+    const chart = cfg.getChart(), series = cfg.getSeries(), bars = cfg.getBars();
+    const HIT = 6;
+    for (const d of userDrawings) {
+      const [p1, p2] = getShapePoints(d, bars, cfg.isLog);
+      const x1 = chart.timeScale().timeToCoordinate(p1.time);
+      const y1 = series.priceToCoordinate(p1.value);
+      const x2 = chart.timeScale().timeToCoordinate(p2.time);
+      const y2 = series.priceToCoordinate(p2.value);
+      if (x1 === null || y1 === null || x2 === null || y2 === null) continue;
+      if (distToSegment(x, y, x1, y1, x2, y2) <= HIT) return { kind: 'shape', ref: d };
+    }
+    for (const pl of priceLines) {
+      const y1 = series.priceToCoordinate(pl.price);
+      if (y1 === null) continue;
+      if (Math.abs(y - y1) <= HIT) return { kind: 'hline', ref: pl };
+    }
+    return null;
+  }
+
+  // Renders the small floating toolbar (⚙ Style, 🗑 Delete) for the
+  // current selection, and the style panel underneath it if open.
+  function renderActionBar(container, x, y, target, kind) {
+    const bar = document.createElement('div');
+    bar.className = 'drawing-toolbar-float';
+    bar.style.left = x + 'px';
+    bar.style.top = y + 'px';
+
+    const settingsBtn = document.createElement('button');
+    settingsBtn.textContent = '⚙ Style';
+    settingsBtn.addEventListener('mousedown', (e) => e.stopPropagation());
+    settingsBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      settingsPanelOpen = !settingsPanelOpen;
+      renderSelectionOverlay();
+    });
+    bar.appendChild(settingsBtn);
+
+    const delBtn = document.createElement('button');
+    delBtn.textContent = '🗑 Delete';
+    delBtn.addEventListener('mousedown', (e) => e.stopPropagation());
+    delBtn.addEventListener('click', (e) => { e.stopPropagation(); deleteSelectedDrawing(); });
+    bar.appendChild(delBtn);
+
+    container.appendChild(bar);
+
+    if (settingsPanelOpen) renderStylePanel(container, x, y + 34, target, kind);
+  }
+
+  // Renders the selection handles (draggable circles at each editable
+  // point) and the floating Style/Delete toolbar for whichever drawing
+  // is currently selected. Plain HTML positioned via the chart's own
+  // time/price-to-coordinate conversion - called on selection change,
+  // on drag, and whenever the visible range changes (pan/zoom/resize)
+  // so handles track the chart.
+  function renderSelectionOverlay() {
+    const container = document.getElementById(cfg.overlayId);
+    if (!container) return;
+    container.innerHTML = '';
+    if (!selectedDrawing) return;
+
+    const chart = cfg.getChart(), series = cfg.getSeries(), containerEl = cfg.getContainerEl();
+    if (!chart || !series || !containerEl) return;
+
+    // The overlay uses overflow:visible (so the style panel isn't
+    // clipped), but that means anything positioned outside the actual
+    // pane - a point scrolled off-screen, or a Ray's far edge - just
+    // renders wherever those coordinates land on the page (into the
+    // watchlist, the header row, a neighboring pane, etc), since
+    // nothing was clipping it. Every handle/button below is gated on
+    // this check instead of being trusted to land inside the pane.
+    const priceScaleWidth = chart.priceScale('right').width();
+    const maxX = containerEl.clientWidth - priceScaleWidth;
+    const maxY = containerEl.clientHeight;
+    function inBounds(x, y) {
+      return x !== null && y !== null && x >= 0 && x <= maxX && y >= 0 && y <= maxY;
+    }
+
+    function makeHandle(x, y, onMove, extraClass) {
+      if (!inBounds(x, y)) return;
+      const h = document.createElement('div');
+      h.className = 'drawing-handle' + (extraClass ? ' ' + extraClass : '');
+      h.style.left = x + 'px';
+      h.style.top = y + 'px';
+      h.addEventListener('mousedown', (evt) => {
+        evt.preventDefault();
+        evt.stopPropagation();
+        const move = (ev) => onMove(ev);
+        const up = () => {
+          document.removeEventListener('mousemove', move);
+          document.removeEventListener('mouseup', up);
+          updateOutputBox();
+        };
+        document.addEventListener('mousemove', move);
+        document.addEventListener('mouseup', up);
+      });
+      container.appendChild(h);
+    }
+
+    if (selectedDrawing.kind === 'shape') {
+      const d = selectedDrawing.ref;
+      const x1 = chart.timeScale().timeToCoordinate(d.time1);
+      const y1 = series.priceToCoordinate(d.price1);
+      makeHandle(x1, y1, (ev) => {
         const { x, y } = screenToChartXY(ev);
         const t = chart.timeScale().coordinateToTime(x);
         const p = series.coordinateToPrice(y);
         if (t === null || p === null) return;
-        if (timeToNumeric(t) === timeToNumeric(d.time1)) return;
-        d.time2 = t; d.price2 = p;
+        // Same same-bar crash risk as the live preview below - refuse
+        // a drag position that would land on the other point's bar.
+        if (d.type === 'hray') {
+          const bars = cfg.getBars();
+          const edgeTime = bars.length ? bars[bars.length - 1].time : null;
+          if (edgeTime !== null && timeToNumeric(t) === timeToNumeric(edgeTime)) return;
+        } else if (timeToNumeric(t) === timeToNumeric(d.time2)) {
+          return;
+        }
+        d.time1 = t; d.price1 = p;
         redrawShape(d);
         renderSelectionOverlay();
       });
-    }
 
-    const [rp1, rp2] = getAnchorPoints(d);
-    const mx1 = chart.timeScale().timeToCoordinate(rp1.time);
-    const my1 = series.priceToCoordinate(rp1.value);
-    const mx2 = chart.timeScale().timeToCoordinate(rp2.time);
-    const my2 = series.priceToCoordinate(rp2.value);
-    if (mx1 !== null && my1 !== null && mx2 !== null && my2 !== null) {
-      const midX = (mx1 + mx2) / 2, midY = (my1 + my2) / 2;
-      if (inBounds(midX, midY)) {
-        // Midpoint handle: drag to move the whole line as a unit rather
-        // than reshaping it from one end. Wired directly (not through
-        // makeHandle's onMove-per-mousemove pattern) since the drag
-        // needs the original mousedown event to compute a starting
-        // offset. Horizontal Ray only has one real point, so its own
-        // anchor handle above already does this job - skip the
-        // redundant overlapping handle here.
-        if (d.type !== 'hray') {
-          const moveHandle = document.createElement('div');
-          moveHandle.className = 'drawing-handle drawing-handle-move';
-          moveHandle.style.left = midX + 'px';
-          moveHandle.style.top = midY + 'px';
-          moveHandle.addEventListener('mousedown', (evt) => startTranslateDrag(d, evt));
-          container.appendChild(moveHandle);
-        }
-
-        const barY = Math.min(my1, my2) - 4;
-        if (inBounds(midX, barY)) renderActionBar(container, midX, barY, d, 'shape');
+      if (d.type === 'trendline' || d.type === 'ray') {
+        const x2 = chart.timeScale().timeToCoordinate(d.time2);
+        const y2 = series.priceToCoordinate(d.price2);
+        makeHandle(x2, y2, (ev) => {
+          const { x, y } = screenToChartXY(ev);
+          const t = chart.timeScale().coordinateToTime(x);
+          const p = series.coordinateToPrice(y);
+          if (t === null || p === null) return;
+          if (timeToNumeric(t) === timeToNumeric(d.time1)) return;
+          d.time2 = t; d.price2 = p;
+          redrawShape(d);
+          renderSelectionOverlay();
+        });
       }
+
+      const [rp1, rp2] = getAnchorPoints(d);
+      const mx1 = chart.timeScale().timeToCoordinate(rp1.time);
+      const my1 = series.priceToCoordinate(rp1.value);
+      const mx2 = chart.timeScale().timeToCoordinate(rp2.time);
+      const my2 = series.priceToCoordinate(rp2.value);
+      if (mx1 !== null && my1 !== null && mx2 !== null && my2 !== null) {
+        const midX = (mx1 + mx2) / 2, midY = (my1 + my2) / 2;
+        if (inBounds(midX, midY)) {
+          // Horizontal Ray only has one real point, so its own anchor
+          // handle above already does this job - skip the redundant
+          // overlapping handle here.
+          if (d.type !== 'hray') {
+            const moveHandle = document.createElement('div');
+            moveHandle.className = 'drawing-handle drawing-handle-move';
+            moveHandle.style.left = midX + 'px';
+            moveHandle.style.top = midY + 'px';
+            moveHandle.addEventListener('mousedown', (evt) => startTranslateDrag(d, evt));
+            container.appendChild(moveHandle);
+          }
+
+          const barY = Math.min(my1, my2) - 4;
+          if (inBounds(midX, barY)) renderActionBar(container, midX, barY, d, 'shape');
+        }
+      }
+    } else if (selectedDrawing.kind === 'hline') {
+      const pl = selectedDrawing.ref;
+      const y = series.priceToCoordinate(pl.price);
+      const midX = maxX / 2;
+      makeHandle(midX, y, (ev) => {
+        const { y: ny } = screenToChartXY(ev);
+        const p = series.coordinateToPrice(ny);
+        if (p === null) return;
+        pl.price = p;
+        pl.lwcHandle.applyOptions({ price: p });
+        renderSelectionOverlay();
+      });
+      if (inBounds(midX, y - 4)) renderActionBar(container, midX, y - 4, pl, 'hline');
     }
-  } else if (selectedDrawing.kind === 'hline') {
-    const pl = selectedDrawing.ref;
-    const y = series.priceToCoordinate(pl.price);
-    const midX = maxX / 2;
-    makeHandle(midX, y, (ev) => {
-      const { y: ny } = screenToChartXY(ev);
-      const p = series.coordinateToPrice(ny);
-      if (p === null) return;
-      pl.price = p;
-      pl.lwcHandle.applyOptions({ price: p });
-      renderSelectionOverlay();
-    });
-    if (inBounds(midX, y - 4)) renderActionBar(container, midX, y - 4, pl, 'hline');
   }
+
+  function flushPreview() {
+    previewRafId = null;
+    if (!previewSeries || !pendingDrawPoint || !previewRafData) return;
+    const pts = [
+      { time: pendingDrawPoint.time, value: pendingDrawPoint.price },
+      { time: previewRafData.time, value: previewRafData.price },
+    ].sort((a, b) => timeToNumeric(a.time) - timeToNumeric(b.time));
+    previewSeries.setData(pts);
+  }
+
+  // Escape cancels an in-progress draw or clears a selection. Delete/
+  // Backspace removes the selected drawing - guarded against firing
+  // while focus is in a text field. Returns true if it handled the key,
+  // so the shared listener can stop after whichever pane actually owns
+  // the current selection/in-progress draw.
+  function handleKeydown(e) {
+    if (e.key === 'Escape') {
+      if (activeDrawTool !== 'none') { setActiveDrawTool('none'); return true; }
+      if (selectedDrawing) { selectDrawing(null); return true; }
+      return false;
+    }
+    if ((e.key === 'Delete' || e.key === 'Backspace') && selectedDrawing) {
+      const tag = document.activeElement && document.activeElement.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return false;
+      e.preventDefault();
+      deleteSelectedDrawing();
+      return true;
+    }
+    return false;
+  }
+
+  // Wires this pane's toolbar buttons and chart-event subscriptions to
+  // whatever chart/series cfg.getChart()/getSeries() currently point
+  // to. Call this once for a pane that never changes (the main chart),
+  // and again every time a pane's chart is destroyed and recreated
+  // (RSI, toggled on/off) - button listeners use onclick= so re-calling
+  // this doesn't stack up duplicate handlers.
+  function attach() {
+    const chart = cfg.getChart(), series = cfg.getSeries();
+
+    document.querySelectorAll(cfg.toolbarSelector).forEach((btn) => {
+      btn.onclick = () => setActiveDrawTool(btn.dataset.tool);
+    });
+
+    // Throttles preview-line updates to once per animation frame.
+    // Calling setData() synchronously on every single crosshairMove
+    // event turned out to be its own trigger for the library's
+    // stack-overflow bug (separate from the same-bar issue below) -
+    // deferring the actual update via requestAnimationFrame breaks
+    // that re-entrant chain, since it always runs in a fresh task
+    // rather than nested inside the event that triggered it.
+    chart.subscribeCrosshairMove((param) => {
+      if (!pendingDrawPoint || !previewSeries) return;
+      if (!param.point || !param.time) return;
+      // Two points on the SAME bar crash this charting library outright
+      // (infinite recursion inside its own auto-scale code). Since the
+      // mouse always passes back over the anchor's own bar right after
+      // the first click, just skip that frame and keep showing the
+      // last valid preview.
+      if (timeToNumeric(param.time) === timeToNumeric(pendingDrawPoint.time)) return;
+      const price = series.coordinateToPrice(param.point.y);
+      if (price === null) return;
+      previewRafData = { time: param.time, price };
+      if (previewRafId === null) previewRafId = requestAnimationFrame(flushPreview);
+    });
+
+    chart.subscribeClick((param) => {
+      // Cursor tool: click near an existing drawing to select it (shows
+      // drag handles + a Delete button); click empty space to deselect.
+      if (activeDrawTool === 'none') {
+        if (!param.point) return;
+        selectDrawing(findDrawingAt(param.point.x, param.point.y));
+        return;
+      }
+
+      if (!param.time || !param.point) return;
+      const price = series.coordinateToPrice(param.point.y);
+      if (price === null) return;
+
+      if (activeDrawTool === 'hline') {
+        addHline(price, 'blue', '', 'user');
+        setActiveDrawTool('none');
+        return;
+      }
+      if (activeDrawTool === 'hray') {
+        addUserDrawing('hray', param.time, price, null, null, '#2962ff', 'user');
+        setActiveDrawTool('none');
+        return;
+      }
+      // trendline / ray - two clicks needed. First click drops a
+      // preview line (with a marker dot at the anchor) that then
+      // follows the mouse via subscribeCrosshairMove above until the
+      // second click.
+      if (!pendingDrawPoint) {
+        pendingDrawPoint = { time: param.time, price };
+        previewSeries = chart.addLineSeries({
+          color: '#2962ff', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed,
+          priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
+          pointMarkersVisible: true, autoscaleInfoProvider: () => null,
+        });
+        previewSeries.setData([{ time: pendingDrawPoint.time, value: pendingDrawPoint.price }]);
+        setStatus('Click a second point to finish the line.', false);
+        return;
+      }
+      if (timeToNumeric(param.time) === timeToNumeric(pendingDrawPoint.time)) {
+        setStatus('Second point needs to be on a different bar - click again.', true);
+        return;
+      }
+      const anchor = pendingDrawPoint;
+      cancelPendingDraw();
+      addUserDrawing(activeDrawTool, anchor.time, anchor.price, param.time, price, '#2962ff', 'user');
+      setActiveDrawTool('none');
+    });
+
+    chart.timeScale().subscribeVisibleLogicalRangeChange(() => renderSelectionOverlay());
+  }
+
+  // Called when this pane's chart is being torn down (RSI toggled off)
+  // so its state doesn't reference series/handles that no longer exist.
+  // The chart's own .remove() already destroys every series drawn on
+  // it, so this just clears our bookkeeping and the overlay DOM.
+  function reset() {
+    cancelPendingDraw();
+    selectedDrawing = null;
+    settingsPanelOpen = false;
+    userDrawings.length = 0;
+    priceLines.length = 0;
+    const el = document.getElementById(cfg.overlayId);
+    if (el) el.innerHTML = '';
+  }
+
+  function clearAllDrawings() {
+    const chart = cfg.getChart(), series = cfg.getSeries();
+    for (const pl of priceLines) series.removePriceLine(pl.lwcHandle);
+    priceLines.length = 0;
+    for (const d of userDrawings) if (d.series) chart.removeSeries(d.series);
+    userDrawings.length = 0;
+    selectedDrawing = null;
+    const el = document.getElementById(cfg.overlayId);
+    if (el) el.innerHTML = '';
+  }
+
+  return {
+    attach, reset, refreshOverlay: renderSelectionOverlay, handleKeydown, clearAllDrawings,
+    addUserDrawing, addHline,
+    userDrawings, priceLines,
+  };
 }
 
-chart.subscribeClick(param => {
-  // Cursor tool: click near an existing drawing to select it (shows
-  // drag handles + a Delete button); click empty space to deselect.
-  if (activeDrawTool === 'none') {
-    if (!param.point) return;
-    selectDrawing(findDrawingAt(param.point.x, param.point.y));
-    return;
-  }
+// The main chart's own drawing tools - same behavior as before this was
+// generalized, just now going through the shared factory.
+const mainPane = createDrawingPane({
+  getChart: () => chart,
+  getSeries: () => series,
+  getContainerEl: () => chartEl,
+  getBars: () => barsData,
+  overlayId: 'drawing-overlay',
+  toolbarSelector: '#draw-toolbar .draw-tool-btn',
+  isLog: true,
+});
+mainPane.attach();
 
-  if (!param.time || !param.point) return;
-  const price = series.coordinateToPrice(param.point.y);
-  if (price === null) return;
+// RSI's own drawing tools. RSI's chart instance is destroyed and
+// recreated whenever RSI is toggled off/on (see setRsiEnabled above,
+// which calls rsiPane.attach()/reset() around each re-creation/
+// teardown) - so unlike mainPane, a single attach() at startup isn't
+// enough on its own. RSI is on by default (rsiEnabled starts true) and
+// createRsiChart() already ran once, synchronously, near the top of
+// this script - well before this const exists - so that first
+// rsiChart/rsiSeries instance still needs its own explicit attach()
+// call below. RSI's price scale is a fixed 0-100 linear range, not
+// logarithmic, hence isLog: false.
+let rsiBarsData = [];
+const rsiPane = createDrawingPane({
+  getChart: () => rsiChart,
+  getSeries: () => rsiSeries,
+  getContainerEl: () => rsiChartEl,
+  getBars: () => rsiBarsData,
+  overlayId: 'rsi-drawing-overlay',
+  toolbarSelector: '#rsi-draw-toolbar .draw-tool-btn',
+  isLog: false,
+});
+if (rsiChart) rsiPane.attach();
 
-  if (activeDrawTool === 'hline') {
-    const handle = series.createPriceLine({
-      price, color: '#2962ff', lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Solid,
-      axisLabelVisible: true, title: '',
-    });
-    priceLines.push({
-      price, color: 'blue', colorHex: '#2962ff', opacity: 1, lineWidth: 2, lineStyle: 'solid',
-      label: '', lwcHandle: handle, source: 'user',
-    });
-    updateOutputBox();
-    setActiveDrawTool('none');
-    return;
-  }
-  if (activeDrawTool === 'hray') {
-    addUserDrawing('hray', param.time, price, null, null, '#2962ff', 'user');
-    setActiveDrawTool('none');
-    return;
-  }
-  // trendline / ray - two clicks needed. First click drops a preview
-  // line (with a marker dot at the anchor) that then follows the mouse
-  // via the subscribeCrosshairMove handler above until the second click.
-  if (!pendingDrawPoint) {
-    pendingDrawPoint = { time: param.time, price };
-    previewSeries = chart.addLineSeries({
-      color: '#2962ff', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed,
-      priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
-      pointMarkersVisible: true, autoscaleInfoProvider: () => null,
-    });
-    previewSeries.setData([{ time: pendingDrawPoint.time, value: pendingDrawPoint.price }]);
-    setStatus('Click a second point to finish the line.', false);
-    return;
-  }
-  if (timeToNumeric(param.time) === timeToNumeric(pendingDrawPoint.time)) {
-    // Same crash risk as the preview above - refuse the click instead
-    // of creating a broken same-bar line, and let them try again
-    // without losing the anchor point they already placed.
-    setStatus('Second point needs to be on a different bar - click again.', true);
-    return;
-  }
-  const anchor = pendingDrawPoint;
-  cancelPendingDraw();
-  addUserDrawing(activeDrawTool, anchor.time, anchor.price, param.time, price, '#2962ff', 'user');
-  setActiveDrawTool('none');
+// Keyboard shortcuts (Escape / Delete) apply to whichever pane actually
+// owns the current in-progress draw or selection - each pane's
+// handleKeydown() is a no-op and returns false if it has neither, so
+// trying both here is safe.
+document.addEventListener('keydown', (e) => {
+  if (mainPane.handleKeydown(e)) return;
+  rsiPane.handleKeydown(e);
 });
 
 const shapeMap = { arrowUp: 'arrowUp', arrowDown: 'arrowDown', circle: 'circle' };
@@ -2270,20 +2410,10 @@ function renderCommands() {
       addedMarkers++;
     } else if (cmd === 'LINE') {
       if (!attrs.price) { errors.push(`LINE missing price: "${line}"`); continue; }
-      const colorName = attrs.color || 'blue';
-      const colorHex = colorMap[colorName] || '#2962ff';
-      const handle = series.createPriceLine({
-        price: parseFloat(attrs.price),
-        color: colorHex,
-        lineWidth: 1,
-        lineStyle: LightweightCharts.LineStyle.Dashed,
-        axisLabelVisible: true,
-        title: attrs.label || '',
-      });
-      priceLines.push({
-        price: parseFloat(attrs.price), color: colorName, colorHex, opacity: 1, lineWidth: 1, lineStyle: 'dashed',
-        label: attrs.label || '', lwcHandle: handle, source: 'claude',
-      });
+      // Kept dashed/1px here (distinct from the solid/2px default a
+      // hand-drawn horizontal line gets) as a visual cue that this
+      // particular line came from a pasted Claude command.
+      mainPane.addHline(parseFloat(attrs.price), attrs.color || 'blue', attrs.label || '', 'claude', 1, 'dashed');
       addedLines++;
     } else if (cmd === 'TRENDLINE' || cmd === 'RAY') {
       if (!attrs.time1 || !attrs.price1 || !attrs.time2 || !attrs.price2) {
@@ -2297,7 +2427,7 @@ function renderCommands() {
         errors.push(`${cmd} time1 and time2 must be different dates: "${line}"`);
         continue;
       }
-      addUserDrawing(
+      mainPane.addUserDrawing(
         cmd === 'TRENDLINE' ? 'trendline' : 'ray',
         attrs.time1, parseFloat(attrs.price1), attrs.time2, parseFloat(attrs.price2),
         colorMap[attrs.color] || '#2962ff', 'claude'
@@ -2308,7 +2438,7 @@ function renderCommands() {
         errors.push(`HRAY missing time/price: "${line}"`);
         continue;
       }
-      addUserDrawing('hray', attrs.time, parseFloat(attrs.price), null, null, colorMap[attrs.color] || '#2962ff', 'claude');
+      mainPane.addUserDrawing('hray', attrs.time, parseFloat(attrs.price), null, null, colorMap[attrs.color] || '#2962ff', 'claude');
       addedLines++;
     } else {
       errors.push(`Unknown command: "${line}"`);
@@ -2328,12 +2458,8 @@ function renderCommands() {
 function clearAll() {
   markers = [];
   refreshMarkers();
-  for (const pl of priceLines) series.removePriceLine(pl.lwcHandle);
-  priceLines = [];
-  for (const d of userDrawings) if (d.series) chart.removeSeries(d.series);
-  userDrawings = [];
-  selectedDrawing = null;
-  document.getElementById('drawing-overlay').innerHTML = '';
+  mainPane.clearAllDrawings();
+  rsiPane.clearAllDrawings();
   document.getElementById('input-box').value = '';
   setStatus('Chart cleared.', false);
   updateOutputBox();
@@ -2396,11 +2522,11 @@ function updateOutputBox() {
     const tag = m.source === 'user' ? ' [added by user on chart]' : '';
     drawingLines.push(`MARKER date=${m.time} pos=${pos} shape=${shapeName} color=${colorName} text="${m.text}"${tag}`);
   }
-  for (const pl of priceLines) {
+  for (const pl of mainPane.priceLines) {
     const tag = pl.source === 'user' ? ' [added by user on chart]' : '';
     drawingLines.push(`LINE price=${pl.price} color=${pl.color} label="${pl.label}"${tag}`);
   }
-  for (const d of userDrawings) {
+  for (const d of mainPane.userDrawings) {
     const colorName = Object.keys(colorMap).find(k => colorMap[k] === d.color) || 'blue';
     const tag = d.source === 'user' ? ' [added by user on chart]' : '';
     if (d.type === 'trendline') {
@@ -2412,6 +2538,17 @@ function updateOutputBox() {
     }
   }
   lines.push(drawingLines.length ? drawingLines.join('\n') : '(none)');
+
+  // RSI drawings aren't described by the MARKER/LINE/TRENDLINE/RAY/HRAY
+  // text protocol yet - just note that they exist so this doesn't look
+  // like data silently went missing. Extending the protocol to cover
+  // them is a separate, not-yet-done piece of work.
+  const rsiDrawingCount = rsiPane.userDrawings.length + rsiPane.priceLines.length;
+  if (rsiDrawingCount > 0) {
+    lines.push('');
+    lines.push(`--- RSI Drawings (${rsiDrawingCount}) ---`);
+    lines.push('Not yet included in this text protocol - visible on the RSI panel itself.');
+  }
 
   document.getElementById('output-box').value = lines.join('\n');
 }
@@ -2571,16 +2708,19 @@ window.addEventListener('resize', () => {
     rsiChart.applyOptions({ width: rsiChartEl.clientWidth, height: rsiChartEl.clientHeight });
   }
   renderEarningsOverlay();
-  renderSelectionOverlay();
+  mainPane.refreshOverlay();
+  rsiPane.refreshOverlay();
   positionDailyBox();
 });
 
-// Earnings triangles (and drawing-selection handles) are plain HTML, not
-// native chart elements, so they need to be manually repositioned
-// whenever the visible time range changes (panning, zooming, scrolling).
+// Earnings triangles (and the main chart's drawing-selection handles)
+// are plain HTML, not native chart elements, so they need to be
+// manually repositioned whenever the visible time range changes
+// (panning, zooming, scrolling). RSI's own pan/zoom is handled by its
+// own subscribeVisibleLogicalRangeChange, set up inside rsiPane.attach().
 chart.timeScale().subscribeVisibleLogicalRangeChange(() => {
   renderEarningsOverlay();
-  renderSelectionOverlay();
+  mainPane.refreshOverlay();
 });
 
 // Keeps the top-right "Current daily" box clear of the price axis labels

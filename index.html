@@ -584,6 +584,13 @@
     margin-bottom: 2px;
     border-bottom: 1px solid var(--panel-border);
   }
+  .tf-checkbox input[type=checkbox]:disabled {
+    cursor: not-allowed;
+  }
+  .tf-checkbox:has(input:disabled) {
+    color: var(--text-dim);
+    cursor: not-allowed;
+  }
 
   #sidebar {
     background: var(--panel);
@@ -777,7 +784,7 @@
       <div id="earnings-overlay"></div>
       <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">52</div>
+      <div id="build-number">53</div>
       <div id="main-no-data">No Data</div>
     </div>
     <div id="rsi-chart-container">
@@ -1947,10 +1954,14 @@ function renderStylePanel(container, x, y, target, kind, onVisibilityChange) {
 //     later view it elsewhere) - 3/2/1 higher, current (home) only,
 //     1/2/3 lower. "Current only" is mutually exclusive with the six
 //     higher/lower boxes; those six can combine freely with each
-//     other. Each column also has its own "All" master checkbox that
-//     remembers the individual selection it had before being switched
-//     off, and restores exactly that (not just all-true) when switched
-//     back on.
+//     other.
+// Each column also has its own "On" master switch - this does NOT
+// touch the individual checkboxes' values at all. While a column is
+// off, it's simply bypassed (treated as fully permissive) regardless
+// of what its individual boxes say, and those boxes are shown disabled
+// so it's clear they're not currently in effect. Flip the column back
+// on and whatever was checked before is exactly what applies again -
+// nothing to remember or restore, since nothing was ever changed.
 // `onVisibilityChange` re-applies the drawing's visible/lineVisible
 // state for whichever timeframe is currently active, since toggling a
 // box for a DIFFERENT timeframe shouldn't change what's shown right
@@ -1964,9 +1975,16 @@ function renderTimeframePanel(container, x, y, target, onVisibilityChange) {
   panel.addEventListener('click', (e) => e.stopPropagation());
 
   // Drawings made before this feature existed won't have these fields;
-  // treat that as "no restriction" rather than leaving them invisible.
+  // treat that as "no restriction, column on" rather than invisible.
   if (!target.timeframes) target.timeframes = defaultTimeframes();
+  if (target.timeframesColumnEnabled === undefined) target.timeframesColumnEnabled = true;
   if (!target.relativeTF) target.relativeTF = defaultRelativeTF();
+  if (target.relativeTFColumnEnabled === undefined) target.relativeTFColumnEnabled = true;
+
+  function commitChange() {
+    if (onVisibilityChange) onVisibilityChange();
+    updateOutputBox();
+  }
 
   const cols = document.createElement('div');
   cols.className = 'tf-two-col';
@@ -1977,30 +1995,19 @@ function renderTimeframePanel(container, x, y, target, onVisibilityChange) {
   const absKeys = Object.keys(TIMEFRAME_META);
   const absCheckboxes = [];
 
-  function commitChange() {
-    if (onVisibilityChange) onVisibilityChange();
-    updateOutputBox();
-  }
-
   const master1 = document.createElement('label');
   master1.className = 'tf-checkbox tf-master';
   const master1Cb = document.createElement('input');
   master1Cb.type = 'checkbox';
-  master1Cb.checked = absKeys.every((k) => target.timeframes[k] !== false);
+  master1Cb.checked = target.timeframesColumnEnabled !== false;
   master1Cb.addEventListener('mousedown', (e) => e.stopPropagation());
   master1Cb.addEventListener('change', () => {
-    if (master1Cb.checked) {
-      const restore = target.timeframesMemory || defaultTimeframes();
-      absKeys.forEach((k) => { target.timeframes[k] = restore[k] !== false; });
-    } else {
-      target.timeframesMemory = Object.assign({}, target.timeframes);
-      absKeys.forEach((k) => { target.timeframes[k] = false; });
-    }
-    absCheckboxes.forEach(({ cb, key }) => { cb.checked = target.timeframes[key] !== false; });
+    target.timeframesColumnEnabled = master1Cb.checked;
+    absCheckboxes.forEach(({ cb }) => { cb.disabled = !master1Cb.checked; });
     commitChange();
   });
   master1.appendChild(master1Cb);
-  master1.appendChild(document.createTextNode('All'));
+  master1.appendChild(document.createTextNode('On'));
   col1.appendChild(master1);
 
   absKeys.forEach((tfKey) => {
@@ -2009,10 +2016,10 @@ function renderTimeframePanel(container, x, y, target, onVisibilityChange) {
     const cb = document.createElement('input');
     cb.type = 'checkbox';
     cb.checked = target.timeframes[tfKey] !== false;
+    cb.disabled = !master1Cb.checked;
     cb.addEventListener('mousedown', (e) => e.stopPropagation());
     cb.addEventListener('change', () => {
       target.timeframes[tfKey] = cb.checked;
-      master1Cb.checked = absKeys.every((k) => target.timeframes[k] !== false);
       commitChange();
     });
     label.appendChild(cb);
@@ -2033,21 +2040,15 @@ function renderTimeframePanel(container, x, y, target, onVisibilityChange) {
   master2.className = 'tf-checkbox tf-master';
   const master2Cb = document.createElement('input');
   master2Cb.type = 'checkbox';
-  master2Cb.checked = relKeys.every((k) => target.relativeTF[k] !== false);
+  master2Cb.checked = target.relativeTFColumnEnabled !== false;
   master2Cb.addEventListener('mousedown', (e) => e.stopPropagation());
   master2Cb.addEventListener('change', () => {
-    if (master2Cb.checked) {
-      const restore = target.relativeTFMemory || defaultRelativeTF();
-      relKeys.forEach((k) => { target.relativeTF[k] = restore[k] !== false; });
-    } else {
-      target.relativeTFMemory = Object.assign({}, target.relativeTF);
-      relKeys.forEach((k) => { target.relativeTF[k] = false; });
-    }
-    relCheckboxes.forEach(({ cb, key }) => { cb.checked = target.relativeTF[key] !== false; });
+    target.relativeTFColumnEnabled = master2Cb.checked;
+    relCheckboxes.forEach(({ cb }) => { cb.disabled = !master2Cb.checked; });
     commitChange();
   });
   master2.appendChild(master2Cb);
-  master2.appendChild(document.createTextNode('All'));
+  master2.appendChild(document.createTextNode('On'));
   col2.appendChild(master2);
 
   relKeys.forEach((relKey) => {
@@ -2056,6 +2057,7 @@ function renderTimeframePanel(container, x, y, target, onVisibilityChange) {
     const cb = document.createElement('input');
     cb.type = 'checkbox';
     cb.checked = target.relativeTF[relKey] !== false;
+    cb.disabled = !master2Cb.checked;
     cb.addEventListener('mousedown', (e) => e.stopPropagation());
     cb.addEventListener('change', () => {
       target.relativeTF[relKey] = cb.checked;
@@ -2069,7 +2071,6 @@ function renderTimeframePanel(container, x, y, target, onVisibilityChange) {
         }
         relCheckboxes.forEach(({ cb: otherCb, key }) => { otherCb.checked = target.relativeTF[key] !== false; });
       }
-      master2Cb.checked = relKeys.every((k) => target.relativeTF[k] !== false);
       commitChange();
     });
     label.appendChild(cb);
@@ -2151,10 +2152,16 @@ function createDrawingPane(cfg) {
   // home" column (offset from the timeframe it was created on, default
   // all-true) must allow it - either one restricting is enough to hide
   // it, matching the AND behavior requested for these two columns.
+  // Each column has its own on/off switch (timeframesColumnEnabled /
+  // relativeTFColumnEnabled) that's independent of the individual
+  // checkboxes - turning a column off just means it's ignored
+  // (bypassed, as if fully permissive) while it's off; the individual
+  // checkboxes underneath are never touched, so whatever was set stays
+  // there and takes effect again the moment the column's switched back on.
   function isVisibleForCurrentTF(d) {
     const tfKey = cfg.getCurrentTFKey();
-    const absoluteOk = !d.timeframes || d.timeframes[tfKey] !== false;
-    const relativeOk = matchesRelativeTF(d, tfKey);
+    const absoluteOk = d.timeframesColumnEnabled === false || !d.timeframes || d.timeframes[tfKey] !== false;
+    const relativeOk = d.relativeTFColumnEnabled === false || matchesRelativeTF(d, tfKey);
     return absoluteOk && relativeOk;
   }
 
@@ -2200,7 +2207,9 @@ function createDrawingPane(cfg) {
       type, time1, price1, time2, price2, color, source,
       opacity: 1, lineWidth: 2, lineStyle: 'solid',
       timeframes: defaultTimeframes(),
+      timeframesColumnEnabled: true,
       relativeTF: defaultRelativeTF(),
+      relativeTFColumnEnabled: true,
       homeTF: cfg.getCurrentTFKey(),
     };
     renderDrawing(drawing);
@@ -2216,14 +2225,14 @@ function createDrawingPane(cfg) {
     const timeframes = defaultTimeframes();
     const relativeTF = defaultRelativeTF();
     const homeTF = cfg.getCurrentTFKey();
-    const visible = isVisibleForCurrentTF({ timeframes, relativeTF, homeTF });
+    const visible = isVisibleForCurrentTF({ timeframes, timeframesColumnEnabled: true, relativeTF, relativeTFColumnEnabled: true, homeTF });
     const handle = cfg.getSeries().createPriceLine({
       price, color: colorHex, lineWidth, lineStyle: LINE_STYLE_MAP[lineStyle],
       axisLabelVisible: visible, lineVisible: visible, title: label || '',
     });
     const pl = {
       price, color: colorName || 'blue', colorHex, opacity: 1, lineWidth, lineStyle,
-      timeframes, relativeTF, homeTF,
+      timeframes, timeframesColumnEnabled: true, relativeTF, relativeTFColumnEnabled: true, homeTF,
       label: label || '', lwcHandle: handle, source,
     };
     priceLines.push(pl);

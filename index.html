@@ -552,6 +552,28 @@
     cursor: pointer;
   }
   .color-swatch.selected { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .tf-checkbox-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 8px;
+    flex: 1;
+    justify-content: flex-start;
+  }
+  .tf-checkbox {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 10px;
+    color: var(--text);
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .tf-checkbox input[type=checkbox] {
+    margin: 0;
+    width: 12px;
+    height: 12px;
+    cursor: pointer;
+  }
 
   #sidebar {
     background: var(--panel);
@@ -745,7 +767,7 @@
       <div id="earnings-overlay"></div>
       <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">49</div>
+      <div id="build-number">50</div>
       <div id="main-no-data">No Data</div>
     </div>
     <div id="rsi-chart-container">
@@ -1073,6 +1095,7 @@ function loadRsiData(tf) {
       document.getElementById('rsi-no-data').classList.remove('show');
       rsiBarsData = data;
       rsiSeries.setData(calculateRSI(data, 14));
+      rsiPane.refreshForTimeframe();
       if (tf === currentTF) {
         const mainRange = chart.timeScale().getVisibleLogicalRange();
         if (mainRange) rsiChart.timeScale().setVisibleLogicalRange(mainRange);
@@ -1127,14 +1150,23 @@ function calculateRSI(bars, period = 14) {
 }
 
 const TIMEFRAME_META = {
-  m5:        { intraday: true,  label: '5-Minute' },
-  m15:       { intraday: true,  label: '15-Minute' },
-  hourly:    { intraday: true,  label: 'Hourly' },
-  daily:     { intraday: false, label: 'Daily' },
-  weekly:    { intraday: false, label: 'Weekly' },
-  monthly:   { intraday: false, label: 'Monthly' },
-  quarterly: { intraday: false, label: 'Quarterly' },
+  m5:        { intraday: true,  label: '5-Minute', short: '5m' },
+  m15:       { intraday: true,  label: '15-Minute', short: '15m' },
+  hourly:    { intraday: true,  label: 'Hourly', short: '1H' },
+  daily:     { intraday: false, label: 'Daily', short: 'D' },
+  weekly:    { intraday: false, label: 'Weekly', short: 'W' },
+  monthly:   { intraday: false, label: 'Monthly', short: 'M' },
+  quarterly: { intraday: false, label: 'Quarterly', short: 'Q' },
 };
+
+// New drawings show on every timeframe by default - this returns a
+// fresh {tfKey: true, ...} object for each one (never share a single
+// object across drawings, or unchecking one box would affect them all).
+function defaultTimeframes() {
+  const out = {};
+  for (const key of Object.keys(TIMEFRAME_META)) out[key] = true;
+  return out;
+}
 
 let markers = [];
 let crossoverMarkers = [];
@@ -1313,7 +1345,7 @@ function loadTimeframe(tf) {
       renderEarningsOverlay();
       positionDailyBox();
       refreshMarkers();
-      mainPane.clearAllDrawings();
+      mainPane.refreshForTimeframe();
       updateOutputBox();
 
       document.querySelectorAll('.tf-btn').forEach(b => b.classList.toggle('active', b.dataset.tf === tf));
@@ -1605,25 +1637,58 @@ const LINE_STYLE_MAP = {
   dotted: LightweightCharts.LineStyle.SparseDotted,
 };
 
+// Converts a drawing's stored time to whatever format the given bars
+// array actually uses (date string for daily-and-up, Unix timestamp for
+// intraday) - the same conversion the multi-timeframe EMA overlays
+// already use (dateStringToTimestamp / date-extraction, both defined
+// near the top of this file), applied here so a drawing made on one
+// timeframe still renders sensibly - and stays draggable/hit-testable -
+// on any other. When converting a date to intraday, snaps to the
+// NEAREST actual loaded bar rather than raw midnight UTC, so
+// findBarIndex() still finds a real bar to work with rather than
+// landing between two bars.
+function resolveDrawingTime(time, bars) {
+  if (!bars.length) return time;
+  const targetIsIntraday = typeof bars[0].time === 'number';
+  const sourceIsIntraday = typeof time === 'number';
+  if (targetIsIntraday === sourceIsIntraday) return time;
+  if (targetIsIntraday) {
+    const targetTs = dateStringToTimestamp(time);
+    let best = bars[0], bestDiff = Math.abs(bars[0].time - targetTs);
+    for (const b of bars) {
+      const diff = Math.abs(b.time - targetTs);
+      if (diff < bestDiff) { best = b; bestDiff = diff; }
+    }
+    return best.time;
+  }
+  return new Date(time * 1000).toISOString().slice(0, 10);
+}
+
 // Returns the two rendered {time, value} endpoints for a shape - for
 // Ray/Horizontal Ray this includes the same edge-extrapolation used at
 // render time, so hit-testing always lines up with what's actually
 // drawn. `bars` is the pane's own bars array (main chart vs RSI can be
-// showing different timeframes with different data).
+// showing different timeframes with different data) - also used to
+// resolve the drawing's stored time into whatever format these bars
+// use, via resolveDrawingTime, so a shape drawn on one timeframe still
+// renders correctly when viewed on another.
 function getShapePoints(drawing, bars, isLog) {
   let p1, p2;
+  const t1 = resolveDrawingTime(drawing.time1, bars);
   if (drawing.type === 'trendline') {
-    p1 = { time: drawing.time1, value: drawing.price1 };
-    p2 = { time: drawing.time2, value: drawing.price2 };
+    const t2 = resolveDrawingTime(drawing.time2, bars);
+    p1 = { time: t1, value: drawing.price1 };
+    p2 = { time: t2, value: drawing.price2 };
   } else if (drawing.type === 'ray') {
-    const goingRight = timeToNumeric(drawing.time2) >= timeToNumeric(drawing.time1);
-    const edgeTime = bars.length ? (goingRight ? bars[bars.length - 1].time : bars[0].time) : drawing.time2;
-    const edgePrice = extrapolatePrice(drawing.time1, drawing.price1, drawing.time2, drawing.price2, edgeTime, isLog);
-    p1 = { time: drawing.time1, value: drawing.price1 };
+    const t2 = resolveDrawingTime(drawing.time2, bars);
+    const goingRight = timeToNumeric(t2) >= timeToNumeric(t1);
+    const edgeTime = bars.length ? (goingRight ? bars[bars.length - 1].time : bars[0].time) : t2;
+    const edgePrice = extrapolatePrice(t1, drawing.price1, t2, drawing.price2, edgeTime, isLog);
+    p1 = { time: t1, value: drawing.price1 };
     p2 = { time: edgeTime, value: edgePrice };
   } else if (drawing.type === 'hray') {
-    const edgeTime = bars.length ? bars[bars.length - 1].time : drawing.time1;
-    p1 = { time: drawing.time1, value: drawing.price1 };
+    const edgeTime = bars.length ? bars[bars.length - 1].time : t1;
+    p1 = { time: t1, value: drawing.price1 };
     p2 = { time: edgeTime, value: drawing.price1 };
   }
   return [p1, p2].sort((a, b) => timeToNumeric(a.time) - timeToNumeric(b.time));
@@ -1637,14 +1702,17 @@ function getShapePoints(drawing, bars, isLog) {
 // which was putting those controls far off in empty space. The user's
 // actual two clicks are always somewhere near the visible chart, so
 // anchoring UI to those instead keeps it sane regardless of how
-// steep/far the ray extends. Pane-agnostic - no bars needed.
-function getAnchorPoints(drawing) {
+// steep/far the ray extends. `bars` is used the same way as in
+// getShapePoints, to resolve stored times into the current format.
+function getAnchorPoints(drawing, bars) {
+  const t1 = resolveDrawingTime(drawing.time1, bars);
   if (drawing.type === 'hray') {
-    return [{ time: drawing.time1, value: drawing.price1 }, { time: drawing.time1, value: drawing.price1 }];
+    return [{ time: t1, value: drawing.price1 }, { time: t1, value: drawing.price1 }];
   }
+  const t2 = resolveDrawingTime(drawing.time2, bars);
   return [
-    { time: drawing.time1, value: drawing.price1 },
-    { time: drawing.time2, value: drawing.price2 },
+    { time: t1, value: drawing.price1 },
+    { time: t2, value: drawing.price2 },
   ].sort((a, b) => timeToNumeric(a.time) - timeToNumeric(b.time));
 }
 
@@ -1681,7 +1749,7 @@ function applyHlineStyle(pl) {
 // Renders the color/opacity/thickness/line-type panel for whichever
 // drawing is selected. Pane-agnostic - `target` carries its own
 // series/priceLine handle, and `kind` says which applyXStyle to use.
-function renderStylePanel(container, x, y, target, kind) {
+function renderStylePanel(container, x, y, target, kind, onVisibilityChange) {
   const panel = document.createElement('div');
   panel.className = 'drawing-settings-panel';
   panel.style.left = x + 'px';
@@ -1800,6 +1868,31 @@ function renderStylePanel(container, x, y, target, kind) {
   });
   addRow('Line', sSelect);
 
+  // Which timeframes this drawing shows on - defaults to all checked.
+  // A drawing made before this feature existed won't have `timeframes`
+  // set at all; treat that the same as all-checked rather than leaving
+  // it invisible everywhere.
+  if (!target.timeframes) target.timeframes = defaultTimeframes();
+  const tfGrid = document.createElement('div');
+  tfGrid.className = 'tf-checkbox-grid';
+  Object.keys(TIMEFRAME_META).forEach((tfKey) => {
+    const tfLabel = document.createElement('label');
+    tfLabel.className = 'tf-checkbox';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = target.timeframes[tfKey] !== false;
+    cb.addEventListener('mousedown', (e) => e.stopPropagation());
+    cb.addEventListener('change', () => {
+      target.timeframes[tfKey] = cb.checked;
+      if (onVisibilityChange) onVisibilityChange();
+      updateOutputBox();
+    });
+    tfLabel.appendChild(cb);
+    tfLabel.appendChild(document.createTextNode(TIMEFRAME_META[tfKey].short));
+    tfGrid.appendChild(tfLabel);
+  });
+  addRow('Show on', tfGrid);
+
   container.appendChild(panel);
 }
 
@@ -1809,6 +1902,10 @@ function renderStylePanel(container, x, y, target, kind) {
 //   getContainerEl()   - returns the pane's own container div (for
 //                        getBoundingClientRect/clientWidth/clientHeight)
 //   getBars()          - returns the pane's own current bars array
+//   getCurrentTFKey()  - returns this pane's current timeframe key
+//                        (one of TIMEFRAME_META's keys) - used to check
+//                        a drawing's own per-timeframe visibility
+//                        checkboxes against whatever's actually showing
 //   overlayId          - id of this pane's selection-overlay <div>
 //   paneId             - a short unique string ('main', 'rsi', ...)
 //                        identifying this pane, used for the
@@ -1859,12 +1956,33 @@ function createDrawingPane(cfg) {
     return cfg.getBars().findIndex(b => timeToNumeric(b.time) === tn);
   }
 
+  // Whether `d` (a shape or an hline) should be visible on THIS pane's
+  // currently active timeframe, per its own timeframes checkboxes
+  // (default all-true, so new drawings show everywhere until the user
+  // unchecks something in the Style panel).
+  function isVisibleForCurrentTF(d) {
+    return !d.timeframes || d.timeframes[cfg.getCurrentTFKey()] !== false;
+  }
+
+  // Re-applies a drawing's visibility for whichever timeframe is
+  // currently active - called right after a timeframe checkbox changes
+  // in the Style panel, and after switching timeframes (refreshForTF).
+  function applyVisibility(target, kind) {
+    const visible = isVisibleForCurrentTF(target);
+    if (kind === 'hline') {
+      target.lwcHandle.applyOptions({ lineVisible: visible, axisLabelVisible: visible });
+    } else if (target.series) {
+      target.series.applyOptions({ visible });
+    }
+  }
+
   function renderDrawing(drawing) {
     const lineSeries = cfg.getChart().addLineSeries({
       color: colorWithOpacity(drawing.color, drawing.opacity != null ? drawing.opacity : 1),
       lineWidth: drawing.lineWidth || 2,
       lineStyle: LINE_STYLE_MAP[drawing.lineStyle || 'solid'],
       priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
+      visible: isVisibleForCurrentTF(drawing),
       // Excludes this series from the price scale's auto-fit
       // computation - repeatedly recomputing autoscale on every
       // setData() call is a documented trigger for this library's
@@ -1879,6 +1997,7 @@ function createDrawingPane(cfg) {
     const drawing = {
       type, time1, price1, time2, price2, color, source,
       opacity: 1, lineWidth: 2, lineStyle: 'solid',
+      timeframes: defaultTimeframes(),
     };
     renderDrawing(drawing);
     userDrawings.push(drawing);
@@ -1890,12 +2009,14 @@ function createDrawingPane(cfg) {
     lineWidth = lineWidth || 2;
     lineStyle = lineStyle || 'solid';
     const colorHex = colorMap[colorName] || '#2962ff';
+    const timeframes = defaultTimeframes();
+    const visible = isVisibleForCurrentTF({ timeframes });
     const handle = cfg.getSeries().createPriceLine({
       price, color: colorHex, lineWidth, lineStyle: LINE_STYLE_MAP[lineStyle],
-      axisLabelVisible: true, title: label || '',
+      axisLabelVisible: visible, lineVisible: visible, title: label || '',
     });
     const pl = {
-      price, color: colorName || 'blue', colorHex, opacity: 1, lineWidth, lineStyle,
+      price, color: colorName || 'blue', colorHex, opacity: 1, lineWidth, lineStyle, timeframes,
       label: label || '', lwcHandle: handle, source,
     };
     priceLines.push(pl);
@@ -1949,9 +2070,9 @@ function createDrawingPane(cfg) {
     const startBarIdx = findBarIndex(startTime);
     if (startBarIdx === -1) return;
 
-    const origPrice1 = d.price1, origBarIdx1 = findBarIndex(d.time1);
+    const origPrice1 = d.price1, origBarIdx1 = findBarIndex(resolveDrawingTime(d.time1, cfg.getBars()));
     const origPrice2 = d.price2;
-    const origBarIdx2 = d.type !== 'hray' && d.time2 != null ? findBarIndex(d.time2) : null;
+    const origBarIdx2 = d.type !== 'hray' && d.time2 != null ? findBarIndex(resolveDrawingTime(d.time2, cfg.getBars())) : null;
 
     const onMove = (ev) => {
       const bars = cfg.getBars();
@@ -2064,7 +2185,7 @@ function createDrawingPane(cfg) {
 
     container.appendChild(bar);
 
-    if (settingsPanelOpen) renderStylePanel(container, x, y + 34, target, kind);
+    if (settingsPanelOpen) renderStylePanel(container, x, y + 34, target, kind, () => applyVisibility(target, kind));
   }
 
   // Renders the selection handles (draggable circles at each editable
@@ -2081,6 +2202,7 @@ function createDrawingPane(cfg) {
 
     const chart = cfg.getChart(), series = cfg.getSeries(), containerEl = cfg.getContainerEl();
     if (!chart || !series || !containerEl) return;
+    const bars = cfg.getBars();
 
     // The overlay uses overflow:visible (so the style panel isn't
     // clipped), but that means anything positioned outside the actual
@@ -2119,7 +2241,8 @@ function createDrawingPane(cfg) {
 
     if (selectedDrawing.kind === 'shape') {
       const d = selectedDrawing.ref;
-      const x1 = chart.timeScale().timeToCoordinate(d.time1);
+      const resolvedTime1 = resolveDrawingTime(d.time1, bars);
+      const x1 = chart.timeScale().timeToCoordinate(resolvedTime1);
       const y1 = series.priceToCoordinate(d.price1);
       makeHandle(x1, y1, (ev) => {
         const { x, y } = screenToChartXY(ev);
@@ -2129,10 +2252,9 @@ function createDrawingPane(cfg) {
         // Same same-bar crash risk as the live preview below - refuse
         // a drag position that would land on the other point's bar.
         if (d.type === 'hray') {
-          const bars = cfg.getBars();
           const edgeTime = bars.length ? bars[bars.length - 1].time : null;
           if (edgeTime !== null && timeToNumeric(t) === timeToNumeric(edgeTime)) return;
-        } else if (timeToNumeric(t) === timeToNumeric(d.time2)) {
+        } else if (timeToNumeric(t) === timeToNumeric(resolveDrawingTime(d.time2, bars))) {
           return;
         }
         d.time1 = t; d.price1 = p;
@@ -2141,21 +2263,22 @@ function createDrawingPane(cfg) {
       });
 
       if (d.type === 'trendline' || d.type === 'ray') {
-        const x2 = chart.timeScale().timeToCoordinate(d.time2);
+        const resolvedTime2 = resolveDrawingTime(d.time2, bars);
+        const x2 = chart.timeScale().timeToCoordinate(resolvedTime2);
         const y2 = series.priceToCoordinate(d.price2);
         makeHandle(x2, y2, (ev) => {
           const { x, y } = screenToChartXY(ev);
           const t = chart.timeScale().coordinateToTime(x);
           const p = series.coordinateToPrice(y);
           if (t === null || p === null) return;
-          if (timeToNumeric(t) === timeToNumeric(d.time1)) return;
+          if (timeToNumeric(t) === timeToNumeric(resolveDrawingTime(d.time1, bars))) return;
           d.time2 = t; d.price2 = p;
           redrawShape(d);
           renderSelectionOverlay();
         });
       }
 
-      const [rp1, rp2] = getAnchorPoints(d);
+      const [rp1, rp2] = getAnchorPoints(d, bars);
       const mx1 = chart.timeScale().timeToCoordinate(rp1.time);
       const my1 = series.priceToCoordinate(rp1.value);
       const mx2 = chart.timeScale().timeToCoordinate(rp2.time);
@@ -2344,9 +2467,21 @@ function createDrawingPane(cfg) {
     if (el) el.innerHTML = '';
   }
 
+  // Called after this pane's timeframe changes (loadTimeframe/
+  // loadRsiData) - drawings are no longer wiped on a timeframe switch,
+  // so instead every existing one needs its points re-resolved against
+  // the new bars (redrawShape, via resolveDrawingTime inside
+  // getShapePoints) and its visibility re-checked against the new
+  // timeframe's checkbox state.
+  function refreshForTimeframe() {
+    for (const d of userDrawings) redrawShape(d);
+    for (const pl of priceLines) applyVisibility(pl, 'hline');
+    renderSelectionOverlay();
+  }
+
   return {
     attach, reset, refreshOverlay: renderSelectionOverlay, handleKeydown, clearAllDrawings,
-    addUserDrawing, addHline, cancelAndDeselect,
+    addUserDrawing, addHline, cancelAndDeselect, refreshForTimeframe,
     userDrawings, priceLines,
   };
 }
@@ -2375,6 +2510,7 @@ const mainPane = createDrawingPane({
   getSeries: () => series,
   getContainerEl: () => chartEl,
   getBars: () => barsData,
+  getCurrentTFKey: () => currentTF,
   overlayId: 'drawing-overlay',
   paneId: 'main',
   shared: sharedToolState,
@@ -2401,6 +2537,7 @@ const rsiPane = createDrawingPane({
   getSeries: () => rsiSeries,
   getContainerEl: () => rsiChartEl,
   getBars: () => rsiBarsData,
+  getCurrentTFKey: () => rsiTF,
   overlayId: 'rsi-drawing-overlay',
   paneId: 'rsi',
   shared: sharedToolState,

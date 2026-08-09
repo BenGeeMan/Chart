@@ -688,7 +688,7 @@
       <div id="earnings-overlay"></div>
       <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">39</div>
+      <div id="build-number">40</div>
       <div id="main-no-data">No Data</div>
     </div>
     <div id="rsi-chart-container">
@@ -1517,6 +1517,12 @@ function renderDrawing(drawing) {
   const lineSeries = chart.addLineSeries({
     color: drawing.color, lineWidth: 2, priceLineVisible: false,
     lastValueVisible: false, crosshairMarkerVisible: false,
+    // Excludes this series from the right price scale's auto-fit
+    // computation - repeatedly recomputing autoscale on every setData()
+    // call is the other documented trigger for this library's
+    // "Maximum call stack size exceeded" crash, alongside the same-bar
+    // issue guarded against elsewhere in this file.
+    autoscaleInfoProvider: () => null,
   });
   lineSeries.setData(getShapePoints(drawing));
   drawing.series = lineSeries;
@@ -1555,6 +1561,8 @@ function screenToChartXY(evt) {
 }
 
 function cancelPendingDraw() {
+  if (previewRafId !== null) { cancelAnimationFrame(previewRafId); previewRafId = null; }
+  previewRafData = null;
   if (previewSeries) { chart.removeSeries(previewSeries); previewSeries = null; }
   pendingDrawPoint = null;
 }
@@ -1578,6 +1586,26 @@ document.addEventListener('keydown', (e) => {
   else if (selectedDrawing) selectDrawing(null);
 });
 
+// Throttles preview-line updates to once per animation frame. Calling
+// setData() synchronously on every single crosshairMove event turned out
+// to be its own trigger for the library's stack-overflow bug (separate
+// from the same-bar issue guarded against below) - deferring the actual
+// update via requestAnimationFrame breaks that re-entrant chain, since
+// it always runs in a fresh task rather than nested inside the event
+// that triggered it.
+let previewRafId = null;
+let previewRafData = null;
+
+function flushPreview() {
+  previewRafId = null;
+  if (!previewSeries || !pendingDrawPoint || !previewRafData) return;
+  const pts = [
+    { time: pendingDrawPoint.time, value: pendingDrawPoint.price },
+    { time: previewRafData.time, value: previewRafData.price },
+  ].sort((a, b) => timeToNumeric(a.time) - timeToNumeric(b.time));
+  previewSeries.setData(pts);
+}
+
 chart.subscribeCrosshairMove(param => {
   if (!pendingDrawPoint || !previewSeries) return;
   if (!param.point || !param.time) return;
@@ -1590,11 +1618,8 @@ chart.subscribeCrosshairMove(param => {
   if (timeToNumeric(param.time) === timeToNumeric(pendingDrawPoint.time)) return;
   const price = series.coordinateToPrice(param.point.y);
   if (price === null) return;
-  const pts = [
-    { time: pendingDrawPoint.time, value: pendingDrawPoint.price },
-    { time: param.time, value: price },
-  ].sort((a, b) => timeToNumeric(a.time) - timeToNumeric(b.time));
-  previewSeries.setData(pts);
+  previewRafData = { time: param.time, price };
+  if (previewRafId === null) previewRafId = requestAnimationFrame(flushPreview);
 });
 
 // --- Distance from a point to a line segment, in pixel space - used to
@@ -1822,7 +1847,7 @@ chart.subscribeClick(param => {
     previewSeries = chart.addLineSeries({
       color: '#2962ff', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed,
       priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
-      pointMarkersVisible: true,
+      pointMarkersVisible: true, autoscaleInfoProvider: () => null,
     });
     previewSeries.setData([{ time: pendingDrawPoint.time, value: pendingDrawPoint.price }]);
     setStatus('Click a second point to finish the line.', false);

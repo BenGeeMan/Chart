@@ -688,7 +688,7 @@
       <div id="earnings-overlay"></div>
       <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">38</div>
+      <div id="build-number">39</div>
       <div id="main-no-data">No Data</div>
     </div>
     <div id="rsi-chart-container">
@@ -1581,6 +1581,13 @@ document.addEventListener('keydown', (e) => {
 chart.subscribeCrosshairMove(param => {
   if (!pendingDrawPoint || !previewSeries) return;
   if (!param.point || !param.time) return;
+  // Two points on the SAME bar crash this charting library outright
+  // (infinite recursion inside its own auto-scale code - a real,
+  // confirmed bug, not a guess). Since the mouse always passes back
+  // over the anchor's own bar right after the first click, just skip
+  // that frame and keep showing the last valid preview instead of
+  // feeding it a degenerate two-point-same-time line.
+  if (timeToNumeric(param.time) === timeToNumeric(pendingDrawPoint.time)) return;
   const price = series.coordinateToPrice(param.point.y);
   if (price === null) return;
   const pts = [
@@ -1722,6 +1729,15 @@ function renderSelectionOverlay() {
       const t = chart.timeScale().coordinateToTime(x);
       const p = series.coordinateToPrice(y);
       if (t === null || p === null) return;
+      // Same same-bar crash risk as the live preview (see comment
+      // above chart.subscribeCrosshairMove) - refuse a drag position
+      // that would land on the other point's bar.
+      if (d.type === 'hray') {
+        const edgeTime = barsData.length ? barsData[barsData.length - 1].time : null;
+        if (edgeTime !== null && timeToNumeric(t) === timeToNumeric(edgeTime)) return;
+      } else if (timeToNumeric(t) === timeToNumeric(d.time2)) {
+        return;
+      }
       d.time1 = t; d.price1 = p;
       redrawShape(d);
       renderSelectionOverlay();
@@ -1736,6 +1752,7 @@ function renderSelectionOverlay() {
           const t = chart.timeScale().coordinateToTime(x);
           const p = series.coordinateToPrice(y);
           if (t === null || p === null) return;
+          if (timeToNumeric(t) === timeToNumeric(d.time1)) return;
           d.time2 = t; d.price2 = p;
           redrawShape(d);
           renderSelectionOverlay();
@@ -1811,6 +1828,13 @@ chart.subscribeClick(param => {
     setStatus('Click a second point to finish the line.', false);
     return;
   }
+  if (timeToNumeric(param.time) === timeToNumeric(pendingDrawPoint.time)) {
+    // Same crash risk as the preview above - refuse the click instead
+    // of creating a broken same-bar line, and let them try again
+    // without losing the anchor point they already placed.
+    setStatus('Second point needs to be on a different bar - click again.', true);
+    return;
+  }
   const anchor = pendingDrawPoint;
   cancelPendingDraw();
   addUserDrawing(activeDrawTool, anchor.time, anchor.price, param.time, price, '#2962ff', 'user');
@@ -1861,6 +1885,13 @@ function renderCommands() {
     } else if (cmd === 'TRENDLINE' || cmd === 'RAY') {
       if (!attrs.time1 || !attrs.price1 || !attrs.time2 || !attrs.price2) {
         errors.push(`${cmd} missing time1/price1/time2/price2: "${line}"`);
+        continue;
+      }
+      if (timeToNumeric(attrs.time1) === timeToNumeric(attrs.time2)) {
+        // time1/time2 on the same bar crashes the charting library
+        // outright (see the comment above chart.subscribeCrosshairMove) -
+        // reject rather than let it through.
+        errors.push(`${cmd} time1 and time2 must be different dates: "${line}"`);
         continue;
       }
       addUserDrawing(

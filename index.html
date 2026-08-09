@@ -884,7 +884,7 @@
       <div id="earnings-overlay"></div>
       <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">67</div>
+      <div id="build-number">68</div>
       <div id="main-no-data">No Data</div>
       <div id="rsi-settings-overlay"></div>
     </div>
@@ -1422,7 +1422,16 @@ function loadRsiData(tf) {
         const mainRange = chart.timeScale().getVisibleLogicalRange();
         if (mainRange) rsiChart.timeScale().setVisibleLogicalRange(mainRange);
       } else {
-        rsiChart.timeScale().fitContent();
+        // Same reasoning as the main chart's own range calculation above -
+        // fitContent() would zoom out to fit RSI's future placeholder
+        // bars too, flattening the actual RSI line down to make room.
+        const realIdx = lastRealBarIndex(data);
+        const futureCount = data.length - 1 - realIdx;
+        const realBarsToShow = Math.max(futureCount, 20);
+        rsiChart.timeScale().setVisibleLogicalRange({
+          from: Math.max(0, realIdx - realBarsToShow),
+          to: data.length - 1,
+        });
       }
       updateOutputBox();
     })
@@ -1653,6 +1662,22 @@ function formatVolume(value) {
 // vs. that bar's own PREVIOUS close (not the start of the visible
 // range), the bar's total range INCLUDING any overnight gap from the
 // prior close, and that bar's volume.
+// Finds the index of the last REAL bar in a bars array - now that
+// every timeframe's data extends past "today" with flat, zero-volume
+// placeholder bars (giving blank chart space to draw into, with known
+// future earnings dates marked on it), `array.length - 1` no longer
+// reliably means "the latest actual trading bar." Scans backward from
+// the end for the first bar that isn't a flat placeholder. Falls back
+// to the true last index if every bar looks like a placeholder (an
+// all-zero-volume array, or an empty one), so callers can still safely
+// index into it without a separate empty check.
+function lastRealBarIndex(bars) {
+  for (let i = bars.length - 1; i >= 0; i--) {
+    if (bars[i].volume !== 0) return i;
+  }
+  return bars.length - 1;
+}
+
 function updateHeadlineStats(index) {
   const bar = barsData[index];
   if (!bar) return;
@@ -1795,10 +1820,24 @@ function loadTimeframe(tf) {
       if (rsiSeries) rsiSeries.setData(calculateRSI(data, 14));
 
       chart.applyOptions({ timeScale: { timeVisible: cfg.intraday, borderColor: '#e0e3eb' } });
-      chart.timeScale().fitContent();
+      // fitContent() would zoom out to fit EVERY loaded bar, including
+      // all the flat future placeholder bars now appended for blank
+      // drawing space - that squashes the real candles down to make
+      // room for a wide stretch of empty flat line. Instead, default to
+      // showing an even split: as many real recent bars as there are
+      // future ones, so the initial view naturally looks like "half
+      // real data, half open space to draw into," with the option to
+      // scroll further into either side afterward.
+      const realIdx = lastRealBarIndex(data);
+      const futureCount = data.length - 1 - realIdx;
+      const realBarsToShow = Math.max(futureCount, 20);
+      chart.timeScale().setVisibleLogicalRange({
+        from: Math.max(0, realIdx - realBarsToShow),
+        to: data.length - 1,
+      });
 
-      updateHeadlineStats(data.length - 1);
-      updateTurnoverBox(barsData.length - 1);
+      updateHeadlineStats(lastRealBarIndex(data));
+      updateTurnoverBox(lastRealBarIndex(barsData));
 
       markers = [];
       crossoverMarkers = computeCrossoverMarkers(data);
@@ -1827,12 +1866,13 @@ function loadDailySnapshot(ticker) {
   fetch(`${ticker.toLowerCase()}_daily.json`)
     .then(r => r.json())
     .then(data => {
-      const last = data[data.length - 1];
+      const last = data[lastRealBarIndex(data)];
       const ema3 = calculateEMA(data, 3, 'volume');
       const ema20 = calculateEMA(data, 20, 'volume');
+      const idx = lastRealBarIndex(data);
       document.getElementById('turnover-daily-lt').textContent = formatVolume(last.volume);
-      document.getElementById('turnover-daily-at3').textContent = formatVolume(ema3[ema3.length - 1].value);
-      document.getElementById('turnover-daily-at20').textContent = formatVolume(ema20[ema20.length - 1].value);
+      document.getElementById('turnover-daily-at3').textContent = formatVolume(ema3[idx] ? ema3[idx].value : null);
+      document.getElementById('turnover-daily-at20').textContent = formatVolume(ema20[idx] ? ema20[idx].value : null);
     })
     .catch(() => setStatus(`Could not load ${ticker.toLowerCase()}_daily.json for the daily snapshot box.`, true));
 }
@@ -3773,8 +3813,8 @@ function updateOutputBox() {
 // leaves the chart entirely.
 chart.subscribeCrosshairMove(param => {
   if (!param.time) {
-    updateHeadlineStats(barsData.length - 1);
-    updateTurnoverBox(barsData.length - 1);
+    updateHeadlineStats(lastRealBarIndex(barsData));
+    updateTurnoverBox(lastRealBarIndex(barsData));
     return;
   }
   const index = barsData.findIndex(b => b.time === param.time);

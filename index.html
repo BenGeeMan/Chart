@@ -591,6 +591,24 @@
     color: var(--text-dim);
     cursor: not-allowed;
   }
+  .panel-actions-row {
+    display: flex;
+    gap: 6px;
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px solid var(--panel-border);
+  }
+  .panel-actions-row button {
+    flex: 1;
+    background: transparent;
+    border: 1px solid var(--panel-border);
+    border-radius: 4px;
+    padding: 4px 6px;
+    font-size: 10px;
+    color: var(--text);
+    cursor: pointer;
+  }
+  .panel-actions-row button:hover { background: rgba(0,0,0,0.06); }
 
   #sidebar {
     background: var(--panel);
@@ -784,7 +802,7 @@
       <div id="earnings-overlay"></div>
       <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">55</div>
+      <div id="build-number">57</div>
       <div id="main-no-data">No Data</div>
     </div>
     <div id="rsi-chart-container">
@@ -1190,16 +1208,18 @@ function defaultTimeframes() {
   return out;
 }
 
-// Default relative-timeframe state: everything checked (matches any
-// timeframe relative to home) - "current" and the 6 higher/lower boxes
-// are mutually exclusive once the user actually interacts with them
-// (enforced in the panel's click handlers), but starting all-checked
-// means this column imposes no restriction until the user narrows it.
+// Default relative-timeframe state: only "2 higher" ticked, a single
+// valid state rather than everything ticked at once (which looked like
+// a real selection but wasn't a state any actual click could produce -
+// confusing on a freshly-drawn shape). Since a range always includes
+// the home timeframe it's measured from (see matchesRelativeTF below),
+// this default still shows on the timeframe the drawing was drawn on,
+// plus 1 and 2 higher.
 function defaultRelativeTF() {
   return {
-    current: true,
-    higher1: true, higher2: true, higher3: true,
-    lower1: true, lower2: true, lower3: true,
+    current: false,
+    higher1: false, higher2: true, higher3: false,
+    lower1: false, lower2: false, lower3: false,
   };
 }
 
@@ -1219,6 +1239,12 @@ function defaultRelativeTF() {
 // showing three ticked boxes for one range was confusing) - taking the
 // max here means the meaning is identical either way, and this also
 // still works correctly on older data saved before that UI change.
+//
+// Home itself (offset 0) matches if "current" is explicitly picked, OR
+// if ANY higher/lower range is picked - a range is measured FROM home,
+// so "2 higher" means "home plus up to 2 higher," not "2 higher,
+// excluding home." "current" alone (no range picked) means "only
+// home, nothing else."
 function matchesRelativeTF(drawing, tfKey) {
   if (!drawing.relativeTF || !drawing.homeTF) return true;
   const homeIdx = TF_ORDER.indexOf(drawing.homeTF);
@@ -1226,7 +1252,10 @@ function matchesRelativeTF(drawing, tfKey) {
   if (homeIdx === -1 || targetIdx === -1) return true;
   const offset = targetIdx - homeIdx;
   const rel = drawing.relativeTF;
-  if (offset === 0) return rel.current !== false;
+  if (offset === 0) {
+    const anyRangePicked = [1, 2, 3].some((n) => rel['higher' + n] !== false || rel['lower' + n] !== false);
+    return rel.current !== false || anyRangePicked;
+  }
   const side = offset > 0 ? 'higher' : 'lower';
   let maxChecked = 0;
   for (const n of [1, 2, 3]) {
@@ -1234,6 +1263,79 @@ function matchesRelativeTF(drawing, tfKey) {
   }
   return Math.abs(offset) <= maxChecked;
 }
+
+// --- Per-tool-type "default" settings (Set as Default / Restore
+// Default, in both the Style and Timeframe panels) ---
+// Each of the 4 line tools (trendline/ray/hray/hline) remembers its OWN
+// style default and its OWN timeframe default, independently - saving
+// a style default for Ray doesn't touch Trend Line's, and saving a
+// style default doesn't touch that tool's timeframe default or vice
+// versa. Persisted to localStorage so it survives a page reload, not
+// just this session; shared between the main chart and RSI panes,
+// since it's about the TOOL, not which pane you happened to draw in.
+const TOOL_DEFAULTS_STORAGE_KEY = 'chartToolDefaults_v1';
+
+function loadToolDefaults() {
+  try {
+    const raw = localStorage.getItem(TOOL_DEFAULTS_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch (e) {
+    // localStorage can throw (private/incognito browsing, storage
+    // disabled, quota) - fall back to an empty in-memory store so the
+    // feature still works for this session, just without persistence.
+    return {};
+  }
+}
+
+let toolDefaultsCache = loadToolDefaults();
+
+function persistToolDefaults() {
+  try {
+    localStorage.setItem(TOOL_DEFAULTS_STORAGE_KEY, JSON.stringify(toolDefaultsCache));
+  } catch (e) {
+    // Same as above - saving is best-effort, not required for the
+    // feature to keep working within this session.
+  }
+}
+
+const FACTORY_STYLE_DEFAULT_SHAPE = { color: '#2962ff', opacity: 1, lineWidth: 2, lineStyle: 'solid' };
+const FACTORY_STYLE_DEFAULT_HLINE = { color: 'blue', colorHex: '#2962ff', opacity: 1, lineWidth: 2, lineStyle: 'solid' };
+
+// Merges any saved style default over the built-in factory one, for
+// the given tool type ('trendline'/'ray'/'hray'/'hline').
+function getEffectiveStyleDefault(toolType) {
+  const saved = toolDefaultsCache[toolType] && toolDefaultsCache[toolType].style;
+  const factory = toolType === 'hline' ? FACTORY_STYLE_DEFAULT_HLINE : FACTORY_STYLE_DEFAULT_SHAPE;
+  return Object.assign({}, factory, saved || {});
+}
+
+function setToolStyleDefault(toolType, styleObj) {
+  toolDefaultsCache[toolType] = toolDefaultsCache[toolType] || {};
+  toolDefaultsCache[toolType].style = styleObj;
+  persistToolDefaults();
+}
+
+// Merges any saved timeframe default over the built-in factory one.
+// Always returns FRESH timeframes/relativeTF objects (never a shared
+// reference to the cached default), since each drawing needs its own
+// independent copy - sharing one object across drawings would mean
+// editing one drawing's checkboxes silently changes them all.
+function getEffectiveTimeframeDefault(toolType) {
+  const saved = toolDefaultsCache[toolType] && toolDefaultsCache[toolType].timeframe;
+  return {
+    timeframes: Object.assign({}, defaultTimeframes(), saved && saved.timeframes),
+    timeframesColumnEnabled: saved && saved.timeframesColumnEnabled !== undefined ? saved.timeframesColumnEnabled : true,
+    relativeTF: Object.assign({}, defaultRelativeTF(), saved && saved.relativeTF),
+    relativeTFColumnEnabled: saved && saved.relativeTFColumnEnabled !== undefined ? saved.relativeTFColumnEnabled : true,
+  };
+}
+
+function setToolTimeframeDefault(toolType, tfObj) {
+  toolDefaultsCache[toolType] = toolDefaultsCache[toolType] || {};
+  toolDefaultsCache[toolType].timeframe = tfObj;
+  persistToolDefaults();
+}
+
 
 let markers = [];
 let crossoverMarkers = [];
@@ -1836,7 +1938,7 @@ function applyHlineStyle(pl) {
 // Renders the color/opacity/thickness/line-type panel for whichever
 // drawing is selected. Pane-agnostic - `target` carries its own
 // series/priceLine handle, and `kind` says which applyXStyle to use.
-function renderStylePanel(container, x, y, target, kind, onVisibilityChange) {
+function renderStylePanel(container, x, y, target, kind, onVisibilityChange, onFullRefresh) {
   const panel = document.createElement('div');
   panel.className = 'drawing-settings-panel';
   panel.style.left = x + 'px';
@@ -1955,6 +2057,51 @@ function renderStylePanel(container, x, y, target, kind, onVisibilityChange) {
   });
   addRow('Line', sSelect);
 
+  // "Set as Default" saves THIS drawing's current style (color/
+  // opacity/thickness/line-type) as the default for every future
+  // drawing of this same tool type - separate per tool (Trend Line,
+  // Ray, etc. each remember their own), separate from the Timeframe
+  // panel's own default below. "Restore Default" does the reverse:
+  // resets this drawing back to whatever that saved (or factory,
+  // if nothing's been saved) default currently is.
+  const toolType = kind === 'hline' ? 'hline' : target.type;
+  const actionsRow = document.createElement('div');
+  actionsRow.className = 'panel-actions-row';
+
+  const setDefaultBtn = document.createElement('button');
+  setDefaultBtn.textContent = 'Set as Default';
+  setDefaultBtn.addEventListener('mousedown', (e) => e.stopPropagation());
+  setDefaultBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const styleToSave = kind === 'hline'
+      ? { color: target.color, colorHex: target.colorHex, opacity: target.opacity, lineWidth: target.lineWidth, lineStyle: target.lineStyle }
+      : { color: target.color, opacity: target.opacity, lineWidth: target.lineWidth, lineStyle: target.lineStyle };
+    setToolStyleDefault(toolType, styleToSave);
+    setStatus('Saved as the default style for this tool.', false);
+  });
+  actionsRow.appendChild(setDefaultBtn);
+
+  const restoreDefaultBtn = document.createElement('button');
+  restoreDefaultBtn.textContent = 'Restore Default';
+  restoreDefaultBtn.addEventListener('mousedown', (e) => e.stopPropagation());
+  restoreDefaultBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const style = getEffectiveStyleDefault(toolType);
+    if (kind === 'hline') { target.color = style.color; target.colorHex = style.colorHex; }
+    else target.color = style.color;
+    target.opacity = style.opacity;
+    target.lineWidth = style.lineWidth;
+    target.lineStyle = style.lineStyle;
+    applyChange();
+    // Multiple fields just changed at once (color, opacity, thickness,
+    // line type) - re-render the whole panel so the color swatch/
+    // slider/dropdowns all reflect the restored values, rather than
+    // trying to update each input individually.
+    if (onFullRefresh) onFullRefresh();
+  });
+  actionsRow.appendChild(restoreDefaultBtn);
+  panel.appendChild(actionsRow);
+
   container.appendChild(panel);
 }
 
@@ -1980,7 +2127,7 @@ function renderStylePanel(container, x, y, target, kind, onVisibilityChange) {
 // state for whichever timeframe is currently active, since toggling a
 // box for a DIFFERENT timeframe shouldn't change what's shown right
 // now.
-function renderTimeframePanel(container, x, y, target, onVisibilityChange) {
+function renderTimeframePanel(container, x, y, target, kind, onVisibilityChange, onFullRefresh) {
   const panel = document.createElement('div');
   panel.className = 'drawing-settings-panel tf-panel';
   panel.style.left = x + 'px';
@@ -2106,6 +2253,47 @@ function renderTimeframePanel(container, x, y, target, onVisibilityChange) {
   cols.appendChild(col2);
 
   panel.appendChild(cols);
+
+  // Same "Set as Default" / "Restore Default" pattern as the Style
+  // panel, but for the timeframe checkboxes - completely separate
+  // saved default, per tool type, from the style one above.
+  const toolType = kind === 'hline' ? 'hline' : target.type;
+  const actionsRow = document.createElement('div');
+  actionsRow.className = 'panel-actions-row';
+
+  const setDefaultBtn = document.createElement('button');
+  setDefaultBtn.textContent = 'Set as Default';
+  setDefaultBtn.addEventListener('mousedown', (e) => e.stopPropagation());
+  setDefaultBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    setToolTimeframeDefault(toolType, {
+      timeframes: Object.assign({}, target.timeframes),
+      timeframesColumnEnabled: target.timeframesColumnEnabled,
+      relativeTF: Object.assign({}, target.relativeTF),
+      relativeTFColumnEnabled: target.relativeTFColumnEnabled,
+    });
+    setStatus('Saved as the default timeframe settings for this tool.', false);
+  });
+  actionsRow.appendChild(setDefaultBtn);
+
+  const restoreDefaultBtn = document.createElement('button');
+  restoreDefaultBtn.textContent = 'Restore Default';
+  restoreDefaultBtn.addEventListener('mousedown', (e) => e.stopPropagation());
+  restoreDefaultBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const tf = getEffectiveTimeframeDefault(toolType);
+    target.timeframes = tf.timeframes;
+    target.timeframesColumnEnabled = tf.timeframesColumnEnabled;
+    target.relativeTF = tf.relativeTF;
+    target.relativeTFColumnEnabled = tf.relativeTFColumnEnabled;
+    commitChange();
+    // Every checkbox in both columns just changed at once - re-render
+    // the whole panel rather than updating 14 checkboxes individually.
+    if (onFullRefresh) onFullRefresh();
+  });
+  actionsRow.appendChild(restoreDefaultBtn);
+  panel.appendChild(actionsRow);
+
   container.appendChild(panel);
 }
 
@@ -2228,13 +2416,21 @@ function createDrawingPane(cfg) {
   }
 
   function addUserDrawing(type, time1, price1, time2, price2, color, source) {
+    const style = getEffectiveStyleDefault(type);
+    const tf = getEffectiveTimeframeDefault(type);
     const drawing = {
-      type, time1, price1, time2, price2, color, source,
-      opacity: 1, lineWidth: 2, lineStyle: 'solid',
-      timeframes: defaultTimeframes(),
-      timeframesColumnEnabled: true,
-      relativeTF: defaultRelativeTF(),
-      relativeTFColumnEnabled: true,
+      type, time1, price1, time2, price2, source,
+      // Pasted Claude commands keep whatever color they explicitly
+      // specified; a user-drawn shape uses this tool's saved (or
+      // factory) default color instead of always being blue.
+      color: source === 'claude' ? color : style.color,
+      opacity: style.opacity,
+      lineWidth: style.lineWidth,
+      lineStyle: style.lineStyle,
+      timeframes: tf.timeframes,
+      timeframesColumnEnabled: tf.timeframesColumnEnabled,
+      relativeTF: tf.relativeTF,
+      relativeTFColumnEnabled: tf.relativeTFColumnEnabled,
       homeTF: cfg.getCurrentTFKey(),
     };
     renderDrawing(drawing);
@@ -2244,20 +2440,37 @@ function createDrawingPane(cfg) {
   }
 
   function addHline(price, colorName, label, source, lineWidth, lineStyle) {
-    lineWidth = lineWidth || 2;
-    lineStyle = lineStyle || 'solid';
-    const colorHex = colorMap[colorName] || '#2962ff';
-    const timeframes = defaultTimeframes();
-    const relativeTF = defaultRelativeTF();
+    let finalColorName, colorHex, finalLineWidth, finalLineStyle, opacity;
+    if (source === 'claude') {
+      // Pasted LINE commands keep their own explicit color/style
+      // (dashed/1px by convention - see handleHlineCommand).
+      finalColorName = colorName || 'blue';
+      colorHex = colorMap[finalColorName] || '#2962ff';
+      finalLineWidth = lineWidth || 2;
+      finalLineStyle = lineStyle || 'solid';
+      opacity = 1;
+    } else {
+      const style = getEffectiveStyleDefault('hline');
+      finalColorName = style.color;
+      colorHex = style.colorHex;
+      finalLineWidth = style.lineWidth;
+      finalLineStyle = style.lineStyle;
+      opacity = style.opacity;
+    }
+    const tf = getEffectiveTimeframeDefault('hline');
     const homeTF = cfg.getCurrentTFKey();
-    const visible = isVisibleForCurrentTF({ timeframes, timeframesColumnEnabled: true, relativeTF, relativeTFColumnEnabled: true, homeTF });
+    const visible = isVisibleForCurrentTF({
+      timeframes: tf.timeframes, timeframesColumnEnabled: tf.timeframesColumnEnabled,
+      relativeTF: tf.relativeTF, relativeTFColumnEnabled: tf.relativeTFColumnEnabled, homeTF,
+    });
     const handle = cfg.getSeries().createPriceLine({
-      price, color: colorHex, lineWidth, lineStyle: LINE_STYLE_MAP[lineStyle],
+      price, color: colorHex, lineWidth: finalLineWidth, lineStyle: LINE_STYLE_MAP[finalLineStyle],
       axisLabelVisible: visible, lineVisible: visible, title: label || '',
     });
     const pl = {
-      price, color: colorName || 'blue', colorHex, opacity: 1, lineWidth, lineStyle,
-      timeframes, timeframesColumnEnabled: true, relativeTF, relativeTFColumnEnabled: true, homeTF,
+      price, color: finalColorName, colorHex, opacity, lineWidth: finalLineWidth, lineStyle: finalLineStyle,
+      timeframes: tf.timeframes, timeframesColumnEnabled: tf.timeframesColumnEnabled,
+      relativeTF: tf.relativeTF, relativeTFColumnEnabled: tf.relativeTFColumnEnabled, homeTF,
       label: label || '', lwcHandle: handle, source,
     };
     priceLines.push(pl);
@@ -2442,8 +2655,8 @@ function createDrawingPane(cfg) {
 
     container.appendChild(bar);
 
-    if (settingsPanelOpen) renderStylePanel(container, x, y + 34, target, kind, () => applyVisibility(target, kind));
-    if (timeframePanelOpen) renderTimeframePanel(container, x, y + 34, target, () => applyVisibility(target, kind));
+    if (settingsPanelOpen) renderStylePanel(container, x, y + 34, target, kind, () => applyVisibility(target, kind), renderSelectionOverlay);
+    if (timeframePanelOpen) renderTimeframePanel(container, x, y + 34, target, kind, () => applyVisibility(target, kind), renderSelectionOverlay);
   }
 
   // Renders the selection handles (draggable circles at each editable

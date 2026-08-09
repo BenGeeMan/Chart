@@ -511,7 +511,7 @@
     font-size: 11px;
     color: var(--text);
     pointer-events: auto;
-    width: 170px;
+    width: 200px;
     transform: translate(-50%, 0);
   }
   .drawing-settings-panel .row {
@@ -526,8 +526,25 @@
   .drawing-settings-panel input[type=color] {
     width: 36px; height: 22px; border: none; padding: 0; background: none; cursor: pointer;
   }
+  .drawing-settings-panel .row > * { min-width: 0; box-sizing: border-box; }
   .drawing-settings-panel input[type=range] { flex: 1; }
   .drawing-settings-panel select { flex: 1; font-size: 11px; }
+  .color-swatch-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    flex: 1;
+    justify-content: flex-start;
+  }
+  .color-swatch {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    border: 1px solid rgba(0,0,0,0.2);
+    padding: 0;
+    cursor: pointer;
+  }
+  .color-swatch.selected { outline: 2px solid var(--accent); outline-offset: 1px; }
 
   #sidebar {
     background: var(--panel);
@@ -721,7 +738,7 @@
       <div id="earnings-overlay"></div>
       <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">41</div>
+      <div id="build-number">42</div>
       <div id="main-no-data">No Data</div>
     </div>
     <div id="rsi-chart-container">
@@ -1537,7 +1554,11 @@ function hexToRgbString(hex) {
 const LINE_STYLE_MAP = {
   solid: LightweightCharts.LineStyle.Solid,
   dashed: LightweightCharts.LineStyle.Dashed,
-  dotted: LightweightCharts.LineStyle.Dotted,
+  // Regular "Dotted" renders as tiny, tightly-packed dots that read as
+  // near-identical to Dashed at a glance. SparseDotted uses the same
+  // dot shape with much wider gaps, which is what actually reads as
+  // visually distinct from a dashed line.
+  dotted: LightweightCharts.LineStyle.SparseDotted,
 };
 
 // Returns the two rendered {time, value} endpoints for a shape - for
@@ -1866,15 +1887,53 @@ function renderStylePanel(container, x, y, target, kind) {
   colorInput.type = 'color';
   colorInput.value = currentHex;
   colorInput.addEventListener('input', () => {
-    if (kind === 'hline') {
-      target.colorHex = colorInput.value;
-      target.color = rgbToColorName(hexToRgbString(colorInput.value)) || 'blue';
-    } else {
-      target.color = colorInput.value;
-    }
-    applyChange();
+    setDrawingColor(colorInput.value);
+    syncSwatchSelection();
   });
   addRow('Color', colorInput);
+
+  // 12 easily-distinguishable preset colors, chosen from the same set
+  // COLOR_NAMES already recognizes - so picking one of these (unlike a
+  // fully custom color) always gets a proper name in the Chart State
+  // text output, not just the "blue" fallback.
+  const SWATCH_PALETTE = [
+    '#000000', '#2962ff', '#26a69a', '#ef5350', '#ff9800', '#8e24aa',
+    '#e91e63', '#6d4c41', '#00acc1', '#f9a825', '#455a64', '#3949ab',
+  ];
+  const swatchEls = [];
+  function syncSwatchSelection() {
+    const cur = colorInput.value.toLowerCase();
+    swatchEls.forEach(el => el.classList.toggle('selected', el.dataset.color.toLowerCase() === cur));
+  }
+  function setDrawingColor(hex) {
+    if (kind === 'hline') {
+      target.colorHex = hex;
+      target.color = rgbToColorName(hexToRgbString(hex)) || 'blue';
+    } else {
+      target.color = hex;
+    }
+    applyChange();
+  }
+  const swatchGrid = document.createElement('div');
+  swatchGrid.className = 'color-swatch-grid';
+  SWATCH_PALETTE.forEach((hex) => {
+    const sw = document.createElement('button');
+    sw.className = 'color-swatch';
+    sw.style.background = hex;
+    sw.dataset.color = hex;
+    sw.title = hex;
+    sw.addEventListener('mousedown', (e) => e.stopPropagation());
+    sw.addEventListener('click', (e) => {
+      e.stopPropagation();
+      colorInput.value = hex;
+      setDrawingColor(hex);
+      syncSwatchSelection();
+    });
+    swatchEls.push(sw);
+    swatchGrid.appendChild(sw);
+  });
+  addRow('', swatchGrid);
+  syncSwatchSelection();
 
   const opInput = document.createElement('input');
   opInput.type = 'range';

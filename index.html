@@ -628,7 +628,11 @@
     cursor: pointer;
   }
   .panel-actions-row button:hover { background: rgba(0,0,0,0.06); }
-  .rsi-settings-panel { width: 190px; }
+  .rsi-settings-panel {
+    width: 190px;
+    max-height: calc(100% - 40px);
+    overflow-y: auto;
+  }
   .rsi-settings-section {
     font-size: 10px;
     font-weight: 700;
@@ -856,13 +860,13 @@
       <div id="earnings-overlay"></div>
       <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">62</div>
+      <div id="build-number">63</div>
       <div id="main-no-data">No Data</div>
+      <div id="rsi-settings-overlay"></div>
     </div>
     <div id="rsi-chart-container">
       <div id="rsi-label">RSI (14)</div>
       <button id="rsi-settings-btn" title="RSI settings">⚙</button>
-      <div id="rsi-settings-overlay"></div>
       <div id="rsi-tf-buttons">
         <button class="rsi-tf-btn" data-tf="m5">5m</button>
         <button class="rsi-tf-btn" data-tf="m15">15m</button>
@@ -1869,8 +1873,12 @@ function renderRsiSettingsPanel() {
 
   const panel = document.createElement('div');
   panel.className = 'drawing-settings-panel rsi-settings-panel';
-  panel.style.top = '22px';
-  panel.style.right = '8px';
+  // Anchored within the spacious main chart area (this overlay's own
+  // parent), not the RSI pane - the RSI pane is only ~150px tall,
+  // nowhere near enough to fit this panel's full height without it
+  // running off the bottom of the page.
+  panel.style.top = '30px';
+  panel.style.right = '10px';
   panel.addEventListener('mousedown', (e) => e.stopPropagation());
   panel.addEventListener('click', (e) => e.stopPropagation());
 

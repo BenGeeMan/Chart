@@ -884,7 +884,7 @@
       <div id="earnings-overlay"></div>
       <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">78</div>
+      <div id="build-number">79</div>
       <div id="main-no-data">No Data</div>
       <div id="rsi-settings-overlay"></div>
     </div>
@@ -1522,7 +1522,7 @@ function applyRsiSettings() {
   // dashed/dotted choice for the real line.
   if (rsiExtensionSeries) {
     rsiExtensionSeries.applyOptions({
-      color: colorWithOpacity(rsiSettings.line.color, 0.4),
+      color: colorWithOpacity(rsiSettings.line.color, 0.75),
       lineWidth: rsiSettings.line.lineWidth,
       lineStyle: LINE_STYLE_MAP.dotted,
     });

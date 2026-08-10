@@ -2913,6 +2913,7 @@ function createDrawingPane(cfg) {
   let previewSeries = null;
   let previewRafId = null;
   let previewRafData = null;
+  let overlayRafId = null;
   let selectedDrawing = null;
   let settingsPanelOpen = false;
   let timeframePanelOpen = false;
@@ -3362,6 +3363,24 @@ function createDrawingPane(cfg) {
     }
   }
 
+  // Schedules one extra renderSelectionOverlay() pass one frame from
+  // now, coalesced (same pattern as previewRafId above) so rapid-fire
+  // callers - a continuous mouse-wheel zoom fires many
+  // subscribeVisibleLogicalRangeChange events in quick succession -
+  // don't queue up a growing backlog of redundant frames. Exists
+  // because renderSelectionOverlay's own timeToCoordinate/
+  // priceToCoordinate reads can lag one frame behind a just-applied
+  // timeScale range change (see the callers below), landing a selected
+  // shape's handles - most visibly the midpoint - off the
+  // correctly-rendered line for that one frame.
+  function scheduleOverlaySync() {
+    if (overlayRafId !== null) return;
+    overlayRafId = requestAnimationFrame(() => {
+      overlayRafId = null;
+      renderSelectionOverlay();
+    });
+  }
+
   function flushPreview() {
     previewRafId = null;
     if (!previewSeries || !pendingDrawPoint || !previewRafData) return;
@@ -3483,7 +3502,10 @@ function createDrawingPane(cfg) {
       cfg.shared.setTool('none');
     });
 
-    chart.timeScale().subscribeVisibleLogicalRangeChange(() => renderSelectionOverlay());
+    chart.timeScale().subscribeVisibleLogicalRangeChange(() => {
+      renderSelectionOverlay();
+      scheduleOverlaySync();
+    });
   }
 
   // Called when this pane's chart is being torn down (RSI toggled off)
@@ -3522,23 +3544,12 @@ function createDrawingPane(cfg) {
     for (const d of userDrawings) redrawShape(d);
     for (const pl of priceLines) applyVisibility(pl, 'hline');
     renderSelectionOverlay();
-    // This runs in the same synchronous tick as loadTimeframe's own
-    // chart.timeScale().setVisibleLogicalRange() call (made just before
-    // refreshForTimeframe() is invoked, to default the new timeframe's
-    // view to real+future bars) - the chart's internal coordinate-
-    // conversion state (what timeToCoordinate/priceToCoordinate report)
-    // can still lag one frame behind that range change, even though the
-    // canvas itself repaints correctly on the next frame regardless.
-    // The call above can therefore position a selected shape's plain-
-    // HTML handles (most visibly the midpoint move-handle, since it's
-    // the average of two independently-converted coordinates) using a
-    // stale scale, landing them off the correctly-rendered line. A
-    // second pass one frame later re-reads the by-then-settled
-    // coordinates and corrects it - only matters if a drawing is still
-    // selected across the timeframe switch (e.g. right after drawing
-    // it), since that's the only case this synchronous call does
-    // anything visible.
-    requestAnimationFrame(renderSelectionOverlay);
+    // Same one-frame-lag risk as scheduleOverlaySync's callers below -
+    // this runs in the same synchronous tick as loadTimeframe's own
+    // chart.timeScale().setVisibleLogicalRange() call, made just before
+    // refreshForTimeframe() to default the new timeframe's view to
+    // real+future bars.
+    scheduleOverlaySync();
   }
 
   return {

@@ -884,7 +884,7 @@
       <div id="earnings-overlay"></div>
       <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">71</div>
+      <div id="build-number">72</div>
       <div id="main-no-data">No Data</div>
       <div id="rsi-settings-overlay"></div>
     </div>
@@ -1007,6 +1007,21 @@ Object.keys(MTF_EMA_COLORS).forEach(tf => {
 
 function dateStringToTimestamp(dateStr) {
   return Math.floor(new Date(dateStr + 'T00:00:00Z').getTime() / 1000);
+}
+
+// Converts a single time value from one timeframe's own format to
+// another's (date string for daily-and-up, Unix timestamp for
+// intraday) - used to sync pan/zoom between the main chart and RSI (or
+// any future indicator pane) by actual CALENDAR time rather than raw
+// bar index, since bar index doesn't mean the same thing across
+// different timeframes (bar 100 on Daily is a completely different
+// date than bar 100 on 15m) but a calendar date/time does.
+function convertTimeBetweenTF(time, fromTF, toTF) {
+  const fromIntraday = TIMEFRAME_META[fromTF].intraday;
+  const toIntraday = TIMEFRAME_META[toTF].intraday;
+  if (fromIntraday === toIntraday) return time;
+  if (toIntraday) return dateStringToTimestamp(time);
+  return new Date(time * 1000).toISOString().slice(0, 10);
 }
 
 // Converts a computed EMA series' time values to whatever format the
@@ -1404,14 +1419,18 @@ function createRsiChart() {
   rsiUpperHandle = null; rsiLowerHandle = null; rsiMiddleHandle = null;
   applyRsiSettings();
 
-  rsiChart.timeScale().subscribeVisibleLogicalRangeChange(range => {
-    // Only push pan/zoom back to the main chart when both are showing
-    // the same timeframe - bar indices don't correspond to the same
-    // thing across different timeframes, so syncing would be meaningless
-    // (and wrong) whenever RSI has its own independent timeframe set.
-    if (!range || syncingFromMain || rsiTF !== currentTF) return;
+  // Syncs pan/zoom to the main chart by CALENDAR time, not raw bar
+  // index, so this keeps working even when RSI's own independent
+  // timeframe selector differs from the main chart's - always synced,
+  // regardless of timeframe, same as any future indicator pane should
+  // be.
+  rsiChart.timeScale().subscribeVisibleTimeRangeChange(range => {
+    if (!range || syncingFromMain) return;
     syncingFromRsi = true;
-    chart.timeScale().setVisibleLogicalRange(range);
+    chart.timeScale().setVisibleRange({
+      from: convertTimeBetweenTF(range.from, rsiTF, currentTF),
+      to: convertTimeBetweenTF(range.to, rsiTF, currentTF),
+    });
     syncingFromRsi = false;
   });
 
@@ -1440,20 +1459,18 @@ function loadRsiData(tf) {
       // flat into the blank future space.
       rsiSeries.setData(calculateRSI(data.slice(0, lastRealBarIndex(data) + 1), 14));
       rsiPane.refreshForTimeframe();
-      if (tf === currentTF) {
-        const mainRange = chart.timeScale().getVisibleLogicalRange();
-        if (mainRange) rsiChart.timeScale().setVisibleLogicalRange(mainRange);
-      } else {
-        // Same reasoning as the main chart's own range calculation above -
-        // fitContent() would zoom out to fit RSI's future placeholder
-        // bars too, flattening the actual RSI line down to make room.
-        const realIdx = lastRealBarIndex(data);
-        const futureCount = data.length - 1 - realIdx;
-        const realBarsToShow = Math.max(futureCount, 20);
-        rsiChart.timeScale().setVisibleLogicalRange({
-          from: Math.max(0, realIdx - realBarsToShow),
-          to: data.length - 1,
+      // Set RSI's initial view to match the main chart's CURRENT
+      // calendar range (converted to RSI's own timeframe format), same
+      // as the ongoing pan/zoom sync above - keeps this consistent
+      // regardless of whether RSI's timeframe matches the main chart's.
+      const mainRange = chart.timeScale().getVisibleRange();
+      if (mainRange) {
+        syncingFromMain = true;
+        rsiChart.timeScale().setVisibleRange({
+          from: convertTimeBetweenTF(mainRange.from, currentTF, tf),
+          to: convertTimeBetweenTF(mainRange.to, currentTF, tf),
         });
+        syncingFromMain = false;
       }
       updateOutputBox();
     })
@@ -1469,12 +1486,16 @@ document.querySelectorAll('.rsi-tf-btn').forEach(btn => {
 
 // The main chart's half of the sync is set up ONCE (it survives RSI
 // being destroyed/recreated) - guarded so it does nothing if rsiChart
-// doesn't currently exist (RSI is switched off), or if RSI is showing
-// a different timeframe than the main chart.
-chart.timeScale().subscribeVisibleLogicalRangeChange(range => {
-  if (!range || syncingFromRsi || !rsiChart || rsiTF !== currentTF) return;
+// doesn't currently exist (RSI is switched off). Syncs by calendar time
+// (see convertTimeBetweenTF) so this stays in sync even when RSI's own
+// timeframe differs from the main chart's.
+chart.timeScale().subscribeVisibleTimeRangeChange(range => {
+  if (!range || syncingFromRsi || !rsiChart) return;
   syncingFromMain = true;
-  rsiChart.timeScale().setVisibleLogicalRange(range);
+  rsiChart.timeScale().setVisibleRange({
+    from: convertTimeBetweenTF(range.from, currentTF, rsiTF),
+    to: convertTimeBetweenTF(range.to, currentTF, rsiTF),
+  });
   syncingFromMain = false;
 });
 
@@ -1830,12 +1851,19 @@ function loadTimeframe(tf) {
       // placeholder bars appended for annotation space - only earnings
       // markers are meant to occupy that future space (see
       // renderEarningsOverlay). realData is used for every MA-style
-      // series below; the candlesticks/volume histogram themselves still
-      // use the full `data` array so the future space still renders.
+      // series below.
       const realIdx = lastRealBarIndex(data);
       const realData = data.slice(0, realIdx + 1);
 
-      series.setData(data);
+      // The candlestick series still needs an entry for every future
+      // bar (so the time axis reserves that space to scroll/draw into),
+      // but NOT as real OHLC - a flat open=high=low=close candle still
+      // gets a rendered body/border, and ~75+ of those back-to-back at
+      // the same price visually merge into one solid horizontal line.
+      // Lightweight Charts' "whitespace" points (bare {time}, no OHLC)
+      // reserve the time slot without drawing anything.
+      const seriesData = data.map((d, i) => (i <= realIdx ? d : { time: d.time }));
+      series.setData(seriesData);
       for (const key of Object.keys(emaSeries)) {
         if (key === 'ema_200') continue; // computed separately below, not in the data file
         emaSeries[key].setData(realData.filter(d => d[key] != null).map(d => ({ time: d.time, value: d[key] })));

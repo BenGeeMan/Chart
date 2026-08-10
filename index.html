@@ -884,7 +884,7 @@
       <div id="earnings-overlay"></div>
       <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">80</div>
+      <div id="build-number">81</div>
       <div id="main-no-data">No Data</div>
       <div id="rsi-settings-overlay"></div>
     </div>
@@ -1521,10 +1521,17 @@ function applyRsiSettings() {
   // look visually distinct rather than following the user's solid/
   // dashed/dotted choice for the real line.
   if (rsiExtensionSeries) {
+    // Regular Dotted (not LINE_STYLE_MAP.dotted, which is SparseDotted -
+    // wide gaps, chosen elsewhere specifically to read as distinct from
+    // Dashed) - this segment needs the opposite: small, tightly-packed
+    // dots so it doesn't look barely-there over a short span. Lighter
+    // (faded) color rather than full opacity - the extra line width
+    // keeps it visible even at reduced opacity, and the lighter color is
+    // itself part of what marks this as "not real data."
     rsiExtensionSeries.applyOptions({
-      color: colorWithOpacity(rsiSettings.line.color, 0.95),
-      lineWidth: rsiSettings.line.lineWidth,
-      lineStyle: LINE_STYLE_MAP.dotted,
+      color: colorWithOpacity(rsiSettings.line.color, 0.5),
+      lineWidth: Math.max(4, rsiSettings.line.lineWidth + 3),
+      lineStyle: LightweightCharts.LineStyle.Dotted,
     });
   }
 

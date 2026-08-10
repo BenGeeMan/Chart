@@ -884,7 +884,7 @@
       <div id="earnings-overlay"></div>
       <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">73</div>
+      <div id="build-number">74</div>
       <div id="main-no-data">No Data</div>
       <div id="rsi-settings-overlay"></div>
     </div>
@@ -1022,6 +1022,32 @@ function convertTimeBetweenTF(time, fromTF, toTF) {
   if (fromIntraday === toIntraday) return time;
   if (toIntraday) return dateStringToTimestamp(time);
   return new Date(time * 1000).toISOString().slice(0, 10);
+}
+
+// Converts a LOGICAL (bar-index) position - which can be fractional, or
+// even negative / past the end of the array once the chart is zoomed
+// out further than there's data to fill it - into a calendar time in
+// `tf`'s own native format. Used instead of
+// chart.timeScale().getVisibleRange() for cross-timeframe sync, because
+// that returns null once the visible range extends past the actual
+// loaded bars (there's no real bar there to report a time for), which
+// was silently freezing the other pane's sync at that point. Here,
+// positions past either end of `bars` are extrapolated using the
+// array's own average bar-to-bar spacing, so sync keeps working exactly
+// where a user would notice it break - fully zoomed out.
+function logicalIndexToTFTime(idx, bars, tf) {
+  const n = bars.length;
+  if (n === 0) return null;
+  const nums = bars.map(b => timeToNumeric(b.time));
+  const step = n > 1 ? (nums[n - 1] - nums[0]) / (n - 1) : 86400;
+  let numeric;
+  if (idx <= 0) numeric = nums[0] + idx * step;
+  else if (idx >= n - 1) numeric = nums[n - 1] + (idx - (n - 1)) * step;
+  else {
+    const lo = Math.floor(idx), hi = Math.ceil(idx);
+    numeric = lo === hi ? nums[lo] : nums[lo] + (idx - lo) * (nums[hi] - nums[lo]);
+  }
+  return TIMEFRAME_META[tf].intraday ? Math.round(numeric) : new Date(numeric * 1000).toISOString().slice(0, 10);
 }
 
 // Converts a computed EMA series' time values to whatever format the
@@ -1436,11 +1462,12 @@ function createRsiChart() {
     if (rsiTF === currentTF) {
       chart.timeScale().setVisibleLogicalRange(range);
     } else {
-      const timeRange = rsiChart.timeScale().getVisibleRange();
-      if (timeRange) {
+      const fromT = logicalIndexToTFTime(range.from, rsiBarsData, rsiTF);
+      const toT = logicalIndexToTFTime(range.to, rsiBarsData, rsiTF);
+      if (fromT != null && toT != null) {
         chart.timeScale().setVisibleRange({
-          from: convertTimeBetweenTF(timeRange.from, rsiTF, currentTF),
-          to: convertTimeBetweenTF(timeRange.to, rsiTF, currentTF),
+          from: convertTimeBetweenTF(fromT, rsiTF, currentTF),
+          to: convertTimeBetweenTF(toT, rsiTF, currentTF),
         });
       }
     }
@@ -1476,12 +1503,17 @@ function loadRsiData(tf) {
       // calendar range (converted to RSI's own timeframe format), same
       // as the ongoing pan/zoom sync above - keeps this consistent
       // regardless of whether RSI's timeframe matches the main chart's.
-      const mainRange = chart.timeScale().getVisibleRange();
-      if (mainRange) {
+      // Uses logicalIndexToTFTime (not getVisibleRange()) so this still
+      // works correctly even if the main chart is currently zoomed out
+      // past its own loaded data.
+      const mainLogicalRange = chart.timeScale().getVisibleLogicalRange();
+      const fromT = mainLogicalRange ? logicalIndexToTFTime(mainLogicalRange.from, barsData, currentTF) : null;
+      const toT = mainLogicalRange ? logicalIndexToTFTime(mainLogicalRange.to, barsData, currentTF) : null;
+      if (fromT != null && toT != null) {
         syncingFromMain = true;
         rsiChart.timeScale().setVisibleRange({
-          from: convertTimeBetweenTF(mainRange.from, currentTF, tf),
-          to: convertTimeBetweenTF(mainRange.to, currentTF, tf),
+          from: convertTimeBetweenTF(fromT, currentTF, tf),
+          to: convertTimeBetweenTF(toT, currentTF, tf),
         });
         syncingFromMain = false;
       }
@@ -1508,11 +1540,12 @@ chart.timeScale().subscribeVisibleLogicalRangeChange(range => {
   if (rsiTF === currentTF) {
     rsiChart.timeScale().setVisibleLogicalRange(range);
   } else {
-    const timeRange = chart.timeScale().getVisibleRange();
-    if (timeRange) {
+    const fromT = logicalIndexToTFTime(range.from, barsData, currentTF);
+    const toT = logicalIndexToTFTime(range.to, barsData, currentTF);
+    if (fromT != null && toT != null) {
       rsiChart.timeScale().setVisibleRange({
-        from: convertTimeBetweenTF(timeRange.from, currentTF, rsiTF),
-        to: convertTimeBetweenTF(timeRange.to, currentTF, rsiTF),
+        from: convertTimeBetweenTF(fromT, currentTF, rsiTF),
+        to: convertTimeBetweenTF(toT, currentTF, rsiTF),
       });
     }
   }

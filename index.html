@@ -884,7 +884,7 @@
       <div id="earnings-overlay"></div>
       <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">77</div>
+      <div id="build-number">78</div>
       <div id="main-no-data">No Data</div>
       <div id="rsi-settings-overlay"></div>
     </div>
@@ -1114,6 +1114,39 @@ function sourceVisibleTime(sourceChart, range, bars, tf) {
   };
 }
 
+// Builds a short, flat "last value carried forward" segment bridging
+// the gap between an indicator's own last REAL (completed) bar and some
+// later reference time - typically the main chart's current real
+// boundary. Shows up whenever an indicator pane is on a coarser
+// timeframe than the main chart and the current period hasn't closed
+// yet (e.g. RSI on Quarterly won't have this quarter's own bar until
+// the quarter ends, even though the main Daily chart already has
+// today's bar) - without this, the indicator's line would just stop
+// short of where the main chart's real candles do, with a distracting
+// gap of nothing in between.
+//
+// Returns an empty array (nothing to draw) if targetTime isn't actually
+// later than the indicator's last real point - the common case when an
+// indicator shares the main chart's own timeframe, since there's no gap
+// to fill.
+//
+// Deliberately generic (indicator-agnostic) rather than RSI-specific -
+// any future indicator pane can call this the same way RSI does, using
+// its own last computed point and its own series for the returned
+// segment (a single Lightweight Charts LineSeries can't mix line styles
+// within itself, so this segment always needs to render on a SEPARATE
+// series from the indicator's real line, styled distinctly - RSI's own
+// usage pairs this with rsiExtensionSeries, styled lighter/dotted via
+// applyRsiSettings()).
+function buildLastValueExtension(lastRealPoint, targetTime) {
+  if (!lastRealPoint) return [];
+  if (timeToNumeric(targetTime) <= timeToNumeric(lastRealPoint.time)) return [];
+  return [
+    { time: lastRealPoint.time, value: lastRealPoint.value },
+    { time: targetTime, value: lastRealPoint.value },
+  ];
+}
+
 // Converts a computed EMA series' time values to whatever format the
 // CURRENTLY ACTIVE chart is using, so both can coexist on one timeScale.
 function alignTimeToCurrentChart(data) {
@@ -1293,6 +1326,17 @@ const turnoverEmaSeries = chart.addLineSeries({
 let rsiChartEl = document.getElementById('rsi-chart');
 let rsiChart = null;
 let rsiSeries = null;
+// A second, lighter/dotted series overlaid on rsiSeries - bridges the
+// visual gap between RSI's own last REAL (completed) bar and the main
+// chart's current real boundary, which shows up whenever RSI is on a
+// coarser timeframe than the main chart and the current period hasn't
+// closed yet (e.g. RSI on Quarterly won't have this quarter's bar until
+// it ends, even though the main Daily chart has today's). Carries the
+// last real value forward flat, styled distinctly so it reads as
+// provisional/not-yet-real rather than actual computed data. See
+// buildLastValueExtension() - deliberately written generically so any
+// future indicator pane can reuse the same pattern, not just RSI.
+let rsiExtensionSeries = null;
 let syncingFromMain = false, syncingFromRsi = false;
 // While true, BOTH sync handlers below no-op unconditionally. Needed
 // because right after a timeframe switch (either pane), the chart
@@ -1471,6 +1515,18 @@ function applyRsiSettings() {
     lineWidth: rsiSettings.line.lineWidth,
     lineStyle: LINE_STYLE_MAP[rsiSettings.line.lineStyle],
   });
+  // Tracks RSI's own line color (lighter) and a dotted style, regardless
+  // of what line style the user picked for the real line - this segment
+  // means something different (not-yet-real data), so it should always
+  // look visually distinct rather than following the user's solid/
+  // dashed/dotted choice for the real line.
+  if (rsiExtensionSeries) {
+    rsiExtensionSeries.applyOptions({
+      color: colorWithOpacity(rsiSettings.line.color, 0.4),
+      lineWidth: rsiSettings.line.lineWidth,
+      lineStyle: LINE_STYLE_MAP.dotted,
+    });
+  }
 
   if (rsiUpperHandle) { rsiSeries.removePriceLine(rsiUpperHandle); rsiUpperHandle = null; }
   if (rsiSettings.upper.enabled) {
@@ -1520,6 +1576,12 @@ function createRsiChart() {
   rsiSeries = rsiChart.addLineSeries({
     priceLineVisible: false,
     lastValueVisible: false,
+    autoscaleInfoProvider: () => ({ priceRange: { minValue: 0, maxValue: 100 } }),
+  });
+  // Style set in applyRsiSettings() below, so it stays in sync with
+  // whatever the user has RSI's own line color set to.
+  rsiExtensionSeries = rsiChart.addLineSeries({
+    priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
     autoscaleInfoProvider: () => ({ priceRange: { minValue: 0, maxValue: 100 } }),
   });
   rsiUpperHandle = null; rsiLowerHandle = null; rsiMiddleHandle = null;
@@ -1605,7 +1667,15 @@ function loadRsiData(tf) {
       // silently landing on the wrong range after a timeframe switch -
       // a genuine, reproducible bug, not a timing/settling issue.
       const rsiRealIdx = lastRealBarIndex(data);
-      rsiSeries.setData(calculateRSI(data.slice(0, rsiRealIdx + 1), 14).concat(data.slice(rsiRealIdx + 1).map(d => ({ time: d.time }))));
+      const rsiRealComputed = calculateRSI(data.slice(0, rsiRealIdx + 1), 14);
+      rsiSeries.setData(rsiRealComputed.concat(data.slice(rsiRealIdx + 1).map(d => ({ time: d.time }))));
+      // Bridges the gap to the main chart's current real boundary when
+      // RSI's own timeframe is coarser and its current period hasn't
+      // closed yet - see buildLastValueExtension's own comment.
+      rsiExtensionSeries.setData(buildLastValueExtension(
+        rsiRealComputed[rsiRealComputed.length - 1],
+        convertTimeBetweenTF(barsData[lastRealBarIndex(barsData)].time, currentTF, tf)
+      ));
       rsiPane.refreshForTimeframe();
       // Set RSI's initial view to match the main chart's CURRENT
       // calendar range (converted to RSI's own timeframe format), same
@@ -2087,7 +2157,13 @@ function loadTimeframe(tf) {
       if (rsiSeries && rsiTF === tf) {
         // Whitespace points for the future bars too - see the matching
         // comment in loadRsiData for why this isn't optional.
-        rsiSeries.setData(calculateRSI(realData, 14).concat(data.slice(realIdx + 1).map(d => ({ time: d.time }))));
+        const rsiComputed = calculateRSI(realData, 14);
+        rsiSeries.setData(rsiComputed.concat(data.slice(realIdx + 1).map(d => ({ time: d.time }))));
+        // Same timeframe as main, so there's normally no gap to bridge
+        // (buildLastValueExtension correctly returns [] in that case) -
+        // still needs calling here to CLEAR a stale extension segment
+        // left over from before RSI was switched to match main.
+        rsiExtensionSeries.setData(buildLastValueExtension(rsiComputed[rsiComputed.length - 1], data[realIdx].time));
         // Keep rsiBarsData describing what's ACTUALLY plotted now, same
         // reasoning as the guard above - every index/time calculation
         // elsewhere (ongoing sync, RSI's own timeframe switch) trusts
@@ -2601,6 +2677,7 @@ function setRsiEnabled(enabled) {
     rsiChart.remove();
     rsiChart = null;
     rsiSeries = null;
+    rsiExtensionSeries = null;
   }
 }
 

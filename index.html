@@ -884,7 +884,7 @@
       <div id="earnings-overlay"></div>
       <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">69</div>
+      <div id="build-number">70</div>
       <div id="main-no-data">No Data</div>
       <div id="rsi-settings-overlay"></div>
     </div>
@@ -1031,7 +1031,11 @@ function loadMtfEma(tf) {
     .then(r => r.json())
     .then(data => {
       if (!data || data.length === 0) { mtfEmaSeries[tf].setData([]); return; }
-      const ema10 = calculateEMA(data, 10, 'close');
+      // Truncate to that file's own last real bar first - it carries
+      // the same future placeholder bars as the main chart's data, and
+      // this overlay shouldn't run flat into them either.
+      const realData = data.slice(0, lastRealBarIndex(data) + 1);
+      const ema10 = calculateEMA(realData, 10, 'close');
       mtfEmaSeries[tf].setData(alignTimeToCurrentChart(ema10));
     })
     .catch(() => setStatus(`Could not load ${tf} EMA 10 overlay.`, true));
@@ -1082,7 +1086,9 @@ function loadRelEma(key, offset) {
     .then(r => r.json())
     .then(data => {
       if (!data || data.length === 0) { relEmaSeries[key].setData([]); return; }
-      const ema10 = calculateEMA(data, 10, 'close');
+      // Same future-placeholder truncation as loadMtfEma above.
+      const realData = data.slice(0, lastRealBarIndex(data) + 1);
+      const ema10 = calculateEMA(realData, 10, 'close');
       relEmaSeries[key].setData(alignTimeToCurrentChart(ema10));
     })
     .catch(() => setStatus(`Could not load ${targetTF} EMA 10 overlay.`, true));
@@ -1803,19 +1809,29 @@ function loadTimeframe(tf) {
       currentTF = tf;
       barsData = data;
 
+      // Moving averages (price EMAs and the volume/turnover EMA) should
+      // stop at the last REAL bar, not run flat across the future
+      // placeholder bars appended for annotation space - only earnings
+      // markers are meant to occupy that future space (see
+      // renderEarningsOverlay). realData is used for every MA-style
+      // series below; the candlesticks/volume histogram themselves still
+      // use the full `data` array so the future space still renders.
+      const realIdx = lastRealBarIndex(data);
+      const realData = data.slice(0, realIdx + 1);
+
       series.setData(data);
       for (const key of Object.keys(emaSeries)) {
         if (key === 'ema_200') continue; // computed separately below, not in the data file
-        emaSeries[key].setData(data.filter(d => d[key] != null).map(d => ({ time: d.time, value: d[key] })));
+        emaSeries[key].setData(realData.filter(d => d[key] != null).map(d => ({ time: d.time, value: d[key] })));
       }
-      emaSeries.ema_200.setData(calculateEMA(data, 200));
+      emaSeries.ema_200.setData(calculateEMA(realData, 200));
       turnoverSeries.setData(data.map(d => ({
         time: d.time,
         value: d.volume,
         color: d.close >= d.open ? 'rgba(38,166,154,0.45)' : 'rgba(239,83,80,0.45)',
       })));
-      currentVolumeEma3 = calculateEMA(data, 3, 'volume');
-      currentVolumeEma20 = calculateEMA(data, 20, 'volume');
+      currentVolumeEma3 = calculateEMA(realData, 3, 'volume');
+      currentVolumeEma20 = calculateEMA(realData, 20, 'volume');
       turnoverEmaSeries.setData(currentVolumeEma20);
       if (rsiSeries) rsiSeries.setData(calculateRSI(data, 14));
 
@@ -1828,7 +1844,6 @@ function loadTimeframe(tf) {
       // future ones, so the initial view naturally looks like "half
       // real data, half open space to draw into," with the option to
       // scroll further into either side afterward.
-      const realIdx = lastRealBarIndex(data);
       const futureCount = data.length - 1 - realIdx;
       const realBarsToShow = Math.max(futureCount, 20);
       chart.timeScale().setVisibleLogicalRange({

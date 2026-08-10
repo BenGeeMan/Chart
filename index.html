@@ -884,7 +884,7 @@
       <div id="earnings-overlay"></div>
       <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">74</div>
+      <div id="build-number">75</div>
       <div id="main-no-data">No Data</div>
       <div id="rsi-settings-overlay"></div>
     </div>
@@ -1048,6 +1048,35 @@ function logicalIndexToTFTime(idx, bars, tf) {
     numeric = lo === hi ? nums[lo] : nums[lo] + (idx - lo) * (nums[hi] - nums[lo]);
   }
   return TIMEFRAME_META[tf].intraday ? Math.round(numeric) : new Date(numeric * 1000).toISOString().slice(0, 10);
+}
+
+// Inverse of logicalIndexToTFTime - finds the (possibly fractional, or
+// out-of-bounds/extrapolated) logical index in `bars` for a given
+// calendar time. Used instead of chart.timeScale().setVisibleRange()
+// when opening a NEW timeframe's initial view - setVisibleRange (time-
+// based) does not reliably apply when called in the same tick as the
+// series.setData() that just loaded the new timeframe's data (the
+// chart's internal scale hasn't caught up to the new data yet, and
+// unlike a plain redraw, waiting a single requestAnimationFrame was
+// still not enough for it to settle - confirmed by direct testing).
+// setVisibleLogicalRange (index-based) does not have this problem, so
+// converting time -> index up front and using that instead sidesteps it
+// entirely.
+function timeToLogicalIndex(time, bars) {
+  const n = bars.length;
+  if (n === 0) return 0;
+  const target = timeToNumeric(time);
+  const nums = bars.map(b => timeToNumeric(b.time));
+  const step = n > 1 ? (nums[n - 1] - nums[0]) / (n - 1) : 86400;
+  if (target <= nums[0]) return step ? (target - nums[0]) / step : 0;
+  if (target >= nums[n - 1]) return step ? (n - 1) + (target - nums[n - 1]) / step : n - 1;
+  for (let i = 0; i < n - 1; i++) {
+    if (nums[i] <= target && target <= nums[i + 1]) {
+      const span = nums[i + 1] - nums[i];
+      return span ? i + (target - nums[i]) / span : i;
+    }
+  }
+  return n - 1;
 }
 
 // Converts a computed EMA series' time values to whatever format the
@@ -1230,6 +1259,22 @@ let rsiChartEl = document.getElementById('rsi-chart');
 let rsiChart = null;
 let rsiSeries = null;
 let syncingFromMain = false, syncingFromRsi = false;
+// While true, BOTH sync handlers below no-op unconditionally. Needed
+// because right after a timeframe switch (either pane), the chart
+// library's own internal reconciliation of the new data fires a
+// CASCADE of several intermediate, transitional range-change events
+// over multiple frames - not just one - as candlesticks/EMAs/etc. each
+// settle. The existing per-direction syncingFromMain/syncingFromRsi
+// guards only protect against a single immediate bounce-back; with a
+// multi-event cascade, an unrelated event can slip through the gap
+// between one guard resetting and the next one being set, corrupting
+// the range with a stale intermediate value (confirmed via direct
+// console instrumentation - a real, reproducible sequence of ~10
+// overlapping fire/bounce events). Silencing sync entirely during the
+// transition, then explicitly forcing both panes to the correct final
+// state once things settle, sidesteps the whole cascade rather than
+// trying to out-guard it.
+let suppressSync = false;
 let rsiTF = 'daily'; // RSI's own timeframe - independent of the main chart's
 
 // --- RSI's own settings: the RSI line's color/thickness/line-type, and
@@ -1457,7 +1502,7 @@ function createRsiChart() {
   // timeframe selector actually differs from the main chart's, since
   // bar index isn't comparable across different timeframes at all.
   rsiChart.timeScale().subscribeVisibleLogicalRangeChange(range => {
-    if (!range || syncingFromMain) return;
+    if (suppressSync || !range || syncingFromMain) return;
     syncingFromRsi = true;
     if (rsiTF === currentTF) {
       chart.timeScale().setVisibleLogicalRange(range);
@@ -1471,7 +1516,17 @@ function createRsiChart() {
         });
       }
     }
-    syncingFromRsi = false;
+    // Resetting this synchronously right after the call above assumes
+    // the main chart's own range-change event (which the guard exists
+    // to suppress) fires SYNCHRONOUSLY within that call - true most of
+    // the time, but confirmed FALSE right after a series.setData() call
+    // (e.g. a timeframe switch just finished loading): the resulting
+    // event can fire on a LATER frame, by which point this flag had
+    // already flipped back to false, so it went unguarded and bounced a
+    // stale value back to this chart, corrupting the just-set range.
+    // Deferring the reset by a frame keeps the guard up through that
+    // window too.
+    requestAnimationFrame(() => { syncingFromRsi = false; });
   });
 
   loadRsiData(rsiTF);
@@ -1493,11 +1548,21 @@ function loadRsiData(tf) {
         return;
       }
       document.getElementById('rsi-no-data').classList.remove('show');
+      suppressSync = true;
       rsiBarsData = data;
-      // Same future-placeholder truncation as the main chart's MAs -
-      // RSI is a moving-average-family indicator too, shouldn't run
-      // flat into the blank future space.
-      rsiSeries.setData(calculateRSI(data.slice(0, lastRealBarIndex(data) + 1), 14));
+      // The RSI line itself shouldn't run flat across the future
+      // placeholder bars (same policy as the main chart's MAs), but the
+      // chart still needs a whitespace point ({time} only, no value) for
+      // each of them - same reasoning as the main chart's candlesticks
+      // (see that comment in loadTimeframe) - otherwise this chart's
+      // timeScale has literally no record of that time existing at all,
+      // and any later setVisibleLogicalRange/setVisibleRange call
+      // targeting a position in that space has nothing to anchor to.
+      // Confirmed this was the actual root cause of RSI's pan/zoom sync
+      // silently landing on the wrong range after a timeframe switch -
+      // a genuine, reproducible bug, not a timing/settling issue.
+      const rsiRealIdx = lastRealBarIndex(data);
+      rsiSeries.setData(calculateRSI(data.slice(0, rsiRealIdx + 1), 14).concat(data.slice(rsiRealIdx + 1).map(d => ({ time: d.time }))));
       rsiPane.refreshForTimeframe();
       // Set RSI's initial view to match the main chart's CURRENT
       // calendar range (converted to RSI's own timeframe format), same
@@ -1510,12 +1575,20 @@ function loadRsiData(tf) {
       const fromT = mainLogicalRange ? logicalIndexToTFTime(mainLogicalRange.from, barsData, currentTF) : null;
       const toT = mainLogicalRange ? logicalIndexToTFTime(mainLogicalRange.to, barsData, currentTF) : null;
       if (fromT != null && toT != null) {
-        syncingFromMain = true;
-        rsiChart.timeScale().setVisibleRange({
-          from: convertTimeBetweenTF(fromT, currentTF, tf),
-          to: convertTimeBetweenTF(toT, currentTF, tf),
-        });
-        syncingFromMain = false;
+        // timeToLogicalIndex + setVisibleLogicalRange rather than
+        // setVisibleRange, called right after rsiSeries.setData() above -
+        // see timeToLogicalIndex's own comment for why.
+        const targetFrom = timeToLogicalIndex(convertTimeBetweenTF(fromT, currentTF, tf), data);
+        const targetTo = timeToLogicalIndex(convertTimeBetweenTF(toT, currentTF, tf), data);
+        rsiChart.timeScale().setVisibleLogicalRange({ from: targetFrom, to: targetTo });
+        // Same settle-then-reassert (2 frames AND a later timeout) as
+        // loadTimeframe - see its own comment (and suppressSync's) for
+        // why a single rAF isn't a wide enough window.
+        const reassert = () => rsiChart.timeScale().setVisibleLogicalRange({ from: targetFrom, to: targetTo });
+        requestAnimationFrame(() => requestAnimationFrame(reassert));
+        setTimeout(() => { reassert(); suppressSync = false; }, 250);
+      } else {
+        suppressSync = false;
       }
       updateOutputBox();
     })
@@ -1535,7 +1608,7 @@ document.querySelectorAll('.rsi-tf-btn').forEach(btn => {
 // fast path as RSI's half above - exact logical-range passthrough when
 // possible, calendar-time conversion only when timeframes differ.
 chart.timeScale().subscribeVisibleLogicalRangeChange(range => {
-  if (!range || syncingFromRsi || !rsiChart) return;
+  if (suppressSync || !range || syncingFromRsi || !rsiChart) return;
   syncingFromMain = true;
   if (rsiTF === currentTF) {
     rsiChart.timeScale().setVisibleLogicalRange(range);
@@ -1549,7 +1622,9 @@ chart.timeScale().subscribeVisibleLogicalRangeChange(range => {
       });
     }
   }
-  syncingFromMain = false;
+  // Deferred reset - see the matching comment on RSI's half of the sync
+  // (above, in createRsiChart) for why a synchronous reset isn't safe.
+  requestAnimationFrame(() => { syncingFromMain = false; });
 });
 
 createRsiChart();
@@ -1896,6 +1971,30 @@ function loadTimeframe(tf) {
         return;
       }
       document.getElementById('main-no-data').classList.remove('show');
+
+      // Silenced until the view is explicitly re-asserted below, once
+      // things have settled - see suppressSync's own comment for why.
+      suppressSync = true;
+
+      // If this is an actual timeframe change (not the initial load, and
+      // not switchTicker() reloading the SAME timeframe for a different
+      // ticker), remember the current view's left edge so the new
+      // timeframe can open showing the same calendar start date instead
+      // of resetting to the generic "half real, half future" default -
+      // e.g. switching Daily -> Weekly while scrolled back to March
+      // should still start at March, not jump back to a recent default
+      // view. Captured BEFORE currentTF/barsData below get overwritten.
+      // Uses logicalIndexToTFTime (not getVisibleRange()) so this still
+      // works even if currently zoomed out past the old timeframe's own
+      // data.
+      const oldTF = currentTF;
+      const isTimeframeChange = tf !== oldTF;
+      let prevStartTime = null;
+      if (isTimeframeChange) {
+        const prevRange = chart.timeScale().getVisibleLogicalRange();
+        if (prevRange && barsData.length) prevStartTime = logicalIndexToTFTime(prevRange.from, barsData, oldTF);
+      }
+
       currentTF = tf;
       barsData = data;
 
@@ -1930,23 +2029,57 @@ function loadTimeframe(tf) {
       currentVolumeEma3 = calculateEMA(realData, 3, 'volume');
       currentVolumeEma20 = calculateEMA(realData, 20, 'volume');
       turnoverEmaSeries.setData(currentVolumeEma20);
-      if (rsiSeries) rsiSeries.setData(calculateRSI(realData, 14));
+      // Only when RSI is following the main chart's own timeframe -
+      // this used to run unconditionally, silently overwriting RSI's
+      // plotted line with the MAIN chart's data even while RSI had its
+      // own INDEPENDENT timeframe selected (e.g. RSI pinned to Weekly
+      // while switching the main chart Daily -> Hourly would blow away
+      // RSI's weekly-computed line with hourly RSI values) - a real,
+      // separate bug surfaced while chasing the pan/zoom sync issue:
+      // rsiBarsData/rsiTF still described the old (correct) independent
+      // data, but the actual plotted series had just been silently
+      // swapped out from under it, making any position/range math
+      // against rsiBarsData meaningless.
+      if (rsiSeries && rsiTF === tf) {
+        // Whitespace points for the future bars too - see the matching
+        // comment in loadRsiData for why this isn't optional.
+        rsiSeries.setData(calculateRSI(realData, 14).concat(data.slice(realIdx + 1).map(d => ({ time: d.time }))));
+        // Keep rsiBarsData describing what's ACTUALLY plotted now, same
+        // reasoning as the guard above - every index/time calculation
+        // elsewhere (ongoing sync, RSI's own timeframe switch) trusts
+        // rsiBarsData to match rsiSeries' real data.
+        rsiBarsData = data;
+      }
 
       chart.applyOptions({ timeScale: { timeVisible: cfg.intraday, borderColor: '#e0e3eb' } });
-      // fitContent() would zoom out to fit EVERY loaded bar, including
-      // all the flat future placeholder bars now appended for blank
-      // drawing space - that squashes the real candles down to make
-      // room for a wide stretch of empty flat line. Instead, default to
-      // showing an even split: as many real recent bars as there are
-      // future ones, so the initial view naturally looks like "half
-      // real data, half open space to draw into," with the option to
-      // scroll further into either side afterward.
-      const futureCount = data.length - 1 - realIdx;
-      const realBarsToShow = Math.max(futureCount, 20);
-      chart.timeScale().setVisibleLogicalRange({
-        from: Math.max(0, realIdx - realBarsToShow),
-        to: data.length - 1,
-      });
+      // targetFrom/targetTo (logical indices into `data`) are re-asserted
+      // once more below, after everything settles - see suppressSync.
+      let targetFrom, targetTo;
+      if (prevStartTime != null) {
+        // Reopen at the same calendar start date as before the switch,
+        // converted into the new timeframe's own time format, still
+        // extending through to the last (future) bar. Uses
+        // timeToLogicalIndex + setVisibleLogicalRange rather than
+        // setVisibleRange - see timeToLogicalIndex's own comment for why.
+        const newStartTime = convertTimeBetweenTF(prevStartTime, oldTF, tf);
+        targetFrom = timeToLogicalIndex(newStartTime, data);
+        targetTo = data.length - 1;
+      } else {
+        // No previous view to inherit from (initial page load) -
+        // fitContent() would zoom out to fit EVERY loaded bar, including
+        // all the flat future placeholder bars now appended for blank
+        // drawing space - that squashes the real candles down to make
+        // room for a wide stretch of empty flat line. Instead, default
+        // to showing an even split: as many real recent bars as there
+        // are future ones, so the initial view naturally looks like
+        // "half real data, half open space to draw into," with the
+        // option to scroll further into either side afterward.
+        const futureCount = data.length - 1 - realIdx;
+        const realBarsToShow = Math.max(futureCount, 20);
+        targetFrom = Math.max(0, realIdx - realBarsToShow);
+        targetTo = data.length - 1;
+      }
+      chart.timeScale().setVisibleLogicalRange({ from: targetFrom, to: targetTo });
 
       updateHeadlineStats(lastRealBarIndex(data));
       updateTurnoverBox(lastRealBarIndex(barsData));
@@ -1964,6 +2097,40 @@ function loadTimeframe(tf) {
       document.querySelectorAll('.tf-btn').forEach(b => b.classList.toggle('active', b.dataset.tf === tf));
       refreshAllEnabledMtfEmas();
       refreshAllEnabledRelEmas();
+
+      // Right after a big data swap like this, the chart library fires a
+      // CASCADE of several intermediate range-change events over the
+      // next several frames as it internally reconciles the new data -
+      // not just the one from the setVisibleLogicalRange call above, and
+      // NOT confined to requestAnimationFrame timing: direct instrumentation
+      // (wrapping setVisibleRange/setVisibleLogicalRange to log every call)
+      // caught the chart library's OWN internal code calling
+      // setVisibleRange with a stale value ~10ms after a 2-frame
+      // rAF-based settle had already re-asserted the correct one -
+      // consistent with a ResizeObserver-driven internal correction,
+      // which runs on its own schedule rather than paint frames. Sync
+      // was suppressed for all of it. Re-asserting once after 2 frames
+      // AND once more after a plain delay (past that resize-observer
+      // window) makes sure OUR value is the one that wins the last word.
+      const applyFinalRange = () => {
+        chart.timeScale().setVisibleLogicalRange({ from: targetFrom, to: targetTo });
+        if (rsiChart) {
+          if (rsiTF === tf) {
+            rsiChart.timeScale().setVisibleLogicalRange({ from: targetFrom, to: targetTo });
+          } else {
+            const fromT = logicalIndexToTFTime(targetFrom, data, tf);
+            const toT = logicalIndexToTFTime(targetTo, data, tf);
+            if (fromT != null && toT != null) {
+              rsiChart.timeScale().setVisibleLogicalRange({
+                from: timeToLogicalIndex(convertTimeBetweenTF(fromT, tf, rsiTF), rsiBarsData),
+                to: timeToLogicalIndex(convertTimeBetweenTF(toT, tf, rsiTF), rsiBarsData),
+              });
+            }
+          }
+        }
+      };
+      requestAnimationFrame(() => requestAnimationFrame(applyFinalRange));
+      setTimeout(() => { applyFinalRange(); suppressSync = false; }, 250);
     })
     .catch(err => {
       document.getElementById('main-no-data').classList.add('show');

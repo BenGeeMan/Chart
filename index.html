@@ -884,7 +884,7 @@
       <div id="earnings-overlay"></div>
       <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">70</div>
+      <div id="build-number">71</div>
       <div id="main-no-data">No Data</div>
       <div id="rsi-settings-overlay"></div>
     </div>
@@ -965,6 +965,15 @@ const series = chart.addCandlestickSeries({
   wickUpColor: '#000000',
   wickDownColor: '#000000',
   lastValueVisible: false,
+  // Without this, Lightweight Charts draws its own dashed "last price"
+  // reference line at the last data point's close, spanning the FULL
+  // chart width regardless of where the actual candles end - normally
+  // barely noticeable near the right edge, but now that the future
+  // placeholder bars leave a wide blank stretch to the right of the
+  // real candles, that default line reads as an unwanted line
+  // extending across the future space, same family of issue as the
+  // MAs fixed above.
+  priceLineVisible: false,
 });
 
 // EMA overlays, sharing the main price scale.
@@ -1148,6 +1157,10 @@ const turnoverSeries = chart.addHistogramSeries({
   priceFormat: { type: 'volume' },
   priceScaleId: 'turnover',
   lastValueVisible: false,
+  // Same reference-line issue as the candlestick series above - without
+  // this, the last volume bar's own dashed price line stretches across
+  // the future placeholder bars' zero-volume space.
+  priceLineVisible: false,
 });
 chart.priceScale('turnover').applyOptions({ scaleMargins: { top: 0.78, bottom: 0 } });
 
@@ -1422,7 +1435,10 @@ function loadRsiData(tf) {
       }
       document.getElementById('rsi-no-data').classList.remove('show');
       rsiBarsData = data;
-      rsiSeries.setData(calculateRSI(data, 14));
+      // Same future-placeholder truncation as the main chart's MAs -
+      // RSI is a moving-average-family indicator too, shouldn't run
+      // flat into the blank future space.
+      rsiSeries.setData(calculateRSI(data.slice(0, lastRealBarIndex(data) + 1), 14));
       rsiPane.refreshForTimeframe();
       if (tf === currentTF) {
         const mainRange = chart.timeScale().getVisibleLogicalRange();
@@ -1833,7 +1849,7 @@ function loadTimeframe(tf) {
       currentVolumeEma3 = calculateEMA(realData, 3, 'volume');
       currentVolumeEma20 = calculateEMA(realData, 20, 'volume');
       turnoverEmaSeries.setData(currentVolumeEma20);
-      if (rsiSeries) rsiSeries.setData(calculateRSI(data, 14));
+      if (rsiSeries) rsiSeries.setData(calculateRSI(realData, 14));
 
       chart.applyOptions({ timeScale: { timeVisible: cfg.intraday, borderColor: '#e0e3eb' } });
       // fitContent() would zoom out to fit EVERY loaded bar, including

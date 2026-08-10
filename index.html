@@ -884,7 +884,7 @@
       <div id="earnings-overlay"></div>
       <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">72</div>
+      <div id="build-number">73</div>
       <div id="main-no-data">No Data</div>
       <div id="rsi-settings-overlay"></div>
     </div>
@@ -1419,18 +1419,31 @@ function createRsiChart() {
   rsiUpperHandle = null; rsiLowerHandle = null; rsiMiddleHandle = null;
   applyRsiSettings();
 
-  // Syncs pan/zoom to the main chart by CALENDAR time, not raw bar
-  // index, so this keeps working even when RSI's own independent
-  // timeframe selector differs from the main chart's - always synced,
-  // regardless of timeframe, same as any future indicator pane should
-  // be.
-  rsiChart.timeScale().subscribeVisibleTimeRangeChange(range => {
+  // Syncs pan/zoom to the main chart. When both panes share the same
+  // timeframe (the common case), the logical (bar-index) range is
+  // passed straight through - exact, no rounding. Converting through
+  // calendar-date strings instead here would lose sub-bar precision for
+  // daily-and-up timeframes (a date string has no fractional-day
+  // component), snapping the range to whole-bar boundaries on every
+  // single drag frame and making the chart visibly stretch/jitter
+  // instead of panning smoothly. Only fall back to time-based
+  // conversion (convertTimeBetweenTF) when RSI's own independent
+  // timeframe selector actually differs from the main chart's, since
+  // bar index isn't comparable across different timeframes at all.
+  rsiChart.timeScale().subscribeVisibleLogicalRangeChange(range => {
     if (!range || syncingFromMain) return;
     syncingFromRsi = true;
-    chart.timeScale().setVisibleRange({
-      from: convertTimeBetweenTF(range.from, rsiTF, currentTF),
-      to: convertTimeBetweenTF(range.to, rsiTF, currentTF),
-    });
+    if (rsiTF === currentTF) {
+      chart.timeScale().setVisibleLogicalRange(range);
+    } else {
+      const timeRange = rsiChart.timeScale().getVisibleRange();
+      if (timeRange) {
+        chart.timeScale().setVisibleRange({
+          from: convertTimeBetweenTF(timeRange.from, rsiTF, currentTF),
+          to: convertTimeBetweenTF(timeRange.to, rsiTF, currentTF),
+        });
+      }
+    }
     syncingFromRsi = false;
   });
 
@@ -1486,16 +1499,23 @@ document.querySelectorAll('.rsi-tf-btn').forEach(btn => {
 
 // The main chart's half of the sync is set up ONCE (it survives RSI
 // being destroyed/recreated) - guarded so it does nothing if rsiChart
-// doesn't currently exist (RSI is switched off). Syncs by calendar time
-// (see convertTimeBetweenTF) so this stays in sync even when RSI's own
-// timeframe differs from the main chart's.
-chart.timeScale().subscribeVisibleTimeRangeChange(range => {
+// doesn't currently exist (RSI is switched off). Same same-timeframe
+// fast path as RSI's half above - exact logical-range passthrough when
+// possible, calendar-time conversion only when timeframes differ.
+chart.timeScale().subscribeVisibleLogicalRangeChange(range => {
   if (!range || syncingFromRsi || !rsiChart) return;
   syncingFromMain = true;
-  rsiChart.timeScale().setVisibleRange({
-    from: convertTimeBetweenTF(range.from, currentTF, rsiTF),
-    to: convertTimeBetweenTF(range.to, currentTF, rsiTF),
-  });
+  if (rsiTF === currentTF) {
+    rsiChart.timeScale().setVisibleLogicalRange(range);
+  } else {
+    const timeRange = chart.timeScale().getVisibleRange();
+    if (timeRange) {
+      rsiChart.timeScale().setVisibleRange({
+        from: convertTimeBetweenTF(timeRange.from, currentTF, rsiTF),
+        to: convertTimeBetweenTF(timeRange.to, currentTF, rsiTF),
+      });
+    }
+  }
   syncingFromMain = false;
 });
 

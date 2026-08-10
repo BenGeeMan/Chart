@@ -57,6 +57,10 @@ project-specific handoff document exists for that project.
 - Tell me clearly, every time, exactly which file(s) to update and how
   (create new vs. edit existing, where it goes) - I won't infer that
   myself.
+- When you have direct terminal/git access to a repo (e.g. via Claude
+  Code, as opposed to me copy-pasting into GitHub's web editor), commit
+  and push changes freely without asking for confirmation before each
+  push - just tell me afterward what changed and was pushed.
 
 ## How I like documentation handled
 

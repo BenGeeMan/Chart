@@ -884,7 +884,7 @@
       <div id="earnings-overlay"></div>
       <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">75</div>
+      <div id="build-number">76</div>
       <div id="main-no-data">No Data</div>
       <div id="rsi-settings-overlay"></div>
     </div>
@@ -1077,6 +1077,30 @@ function timeToLogicalIndex(time, bars) {
     }
   }
   return n - 1;
+}
+
+// For ongoing pan/zoom sync between panes on different timeframes:
+// prefers the SOURCE chart's own naturally-clamped visible time range
+// (chart.timeScale().getVisibleRange()) - this matches what's actually
+// displayed, e.g. clamped to the first real bar once scrolled past it,
+// since there's no whitespace reserved before the start of the data
+// (only after, for the future placeholder bars). Falls back to
+// logicalIndexToTFTime's own unbounded extrapolation only when
+// getVisibleRange() genuinely returns null - confirmed via direct
+// testing that this only happens once zoomed out past even the future
+// whitespace reservation, not for ordinary past-the-data scrolling.
+// Using the raw logical range unconditionally (the previous approach)
+// let the OTHER pane's sync target keep running away into increasingly
+// wrong, unrelated dates even after the source chart's own display had
+// already clamped/frozen at its true boundary - confirmed as a real,
+// reproducible bug via a simulated rapid mouse-wheel zoom-out.
+function sourceVisibleTime(sourceChart, range, bars, tf) {
+  const clamped = sourceChart.timeScale().getVisibleRange();
+  if (clamped) return clamped;
+  return {
+    from: logicalIndexToTFTime(range.from, bars, tf),
+    to: logicalIndexToTFTime(range.to, bars, tf),
+  };
 }
 
 // Converts a computed EMA series' time values to whatever format the
@@ -1507,8 +1531,7 @@ function createRsiChart() {
     if (rsiTF === currentTF) {
       chart.timeScale().setVisibleLogicalRange(range);
     } else {
-      const fromT = logicalIndexToTFTime(range.from, rsiBarsData, rsiTF);
-      const toT = logicalIndexToTFTime(range.to, rsiBarsData, rsiTF);
+      const { from: fromT, to: toT } = sourceVisibleTime(rsiChart, range, rsiBarsData, rsiTF);
       if (fromT != null && toT != null) {
         chart.timeScale().setVisibleRange({
           from: convertTimeBetweenTF(fromT, rsiTF, currentTF),
@@ -1613,8 +1636,7 @@ chart.timeScale().subscribeVisibleLogicalRangeChange(range => {
   if (rsiTF === currentTF) {
     rsiChart.timeScale().setVisibleLogicalRange(range);
   } else {
-    const fromT = logicalIndexToTFTime(range.from, barsData, currentTF);
-    const toT = logicalIndexToTFTime(range.to, barsData, currentTF);
+    const { from: fromT, to: toT } = sourceVisibleTime(chart, range, barsData, currentTF);
     if (fromT != null && toT != null) {
       rsiChart.timeScale().setVisibleRange({
         from: convertTimeBetweenTF(fromT, currentTF, rsiTF),

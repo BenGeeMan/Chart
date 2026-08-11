@@ -139,6 +139,7 @@
     position: relative;
     flex: 1;
     min-height: 0;
+    order: 0; /* anchor: indicator panes use order <0 (top) / >0 (bottom) */
   }
   #header-separator {
     width: 1px;
@@ -279,6 +280,17 @@
     height: 140px;
     border-top: 1px solid var(--panel-border);
   }
+  #macd-resize-handle {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 0;
+    height: 6px;
+    cursor: ns-resize;
+    z-index: 9;
+    background: transparent;
+  }
+  #macd-resize-handle:hover { background: rgba(41,98,255,0.15); }
   #macd-chart-container.hidden { display: none; }
   #macd-chart { width: 100%; height: 100%; }
   #macd-label {
@@ -952,7 +964,7 @@
       <div id="earnings-overlay"></div>
       <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">88</div>
+      <div id="build-number">89</div>
       <div id="main-no-data">No Data</div>
       <div id="rsi-settings-overlay"></div>
       <div id="macd-settings-overlay"></div>
@@ -975,6 +987,7 @@
       <div id="rsi-no-data">No Data</div>
     </div>
     <div id="macd-chart-container">
+      <div id="macd-resize-handle" title="Drag to resize"></div>
       <div id="macd-label">MACD (12,26,9)</div>
       <button id="macd-settings-btn" title="MACD settings">⚙</button>
       <div id="macd-tf-buttons">
@@ -1732,7 +1745,10 @@ function applyRsiLayout() {
   const rsiContainer = document.getElementById('rsi-chart-container');
   if (!rsiContainer) return;
   rsiContainer.style.height = rsiLayout.height + 'px';
-  rsiContainer.style.order = rsiLayout.position === 'top' ? '-1' : '0';
+  // order relative to #main-chart-area (order 0): top docks above, bottom
+  // below. Explicit +1 for bottom (not 0) so a second repositionable pane
+  // (MACD) can also dock above/below main without order collisions.
+  rsiContainer.style.order = rsiLayout.position === 'top' ? '-1' : '1';
   // The resize handle always sits on whichever edge borders the main
   // chart, so dragging it always means "grow/shrink toward the main
   // chart" regardless of whether RSI is docked at the top or bottom.
@@ -1790,6 +1806,68 @@ function resizeChartsForRsiLayout() {
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup', onUp);
       persistRsiLayout();
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  });
+})();
+
+// --- MACD pane layout: height + position (top/bottom), the direct mirror
+// of the RSI layout system above (rsiLayout_v1 / applyRsiLayout / etc.).
+// Persisted separately under macdLayout_v1. ---
+const MACD_LAYOUT_STORAGE_KEY = 'macdLayout_v1';
+const MACD_LAYOUT_FACTORY_DEFAULT = { height: 140, position: 'bottom' };
+const MACD_MIN_HEIGHT = 80;
+const MACD_MAX_HEIGHT = 500;
+function loadMacdLayout() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(MACD_LAYOUT_STORAGE_KEY) || 'null');
+    return Object.assign({}, MACD_LAYOUT_FACTORY_DEFAULT, saved);
+  } catch (e) { return Object.assign({}, MACD_LAYOUT_FACTORY_DEFAULT); }
+}
+let macdLayout = loadMacdLayout();
+function persistMacdLayout() {
+  try { localStorage.setItem(MACD_LAYOUT_STORAGE_KEY, JSON.stringify(macdLayout)); } catch (e) {}
+}
+function applyMacdLayout() {
+  const el = document.getElementById('macd-chart-container');
+  if (!el) return;
+  el.style.height = macdLayout.height + 'px';
+  el.style.order = macdLayout.position === 'top' ? '-1' : '1';
+  const handle = document.getElementById('macd-resize-handle');
+  if (handle) {
+    if (macdLayout.position === 'top') { handle.style.top = 'auto'; handle.style.bottom = '0'; }
+    else { handle.style.top = '0'; handle.style.bottom = 'auto'; }
+  }
+  if (macdChart) macdChart.applyOptions({ width: macdChartEl.clientWidth, height: macdChartEl.clientHeight });
+}
+// Resizes the main chart too (shared flex column) and refreshes overlays -
+// same as resizeChartsForRsiLayout. Only called from user-triggered paths.
+function resizeChartsForMacdLayout() {
+  applyMacdLayout();
+  chart.applyOptions({ width: chartEl.clientWidth, height: chartEl.clientHeight });
+  renderEarningsOverlay();
+  mainPane.refreshOverlay();
+  if (rsiChart) rsiPane.refreshOverlay();
+  positionDailyBox();
+}
+(function setupMacdResize() {
+  const handle = document.getElementById('macd-resize-handle');
+  if (!handle) return;
+  handle.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    const startY = e.clientY;
+    const startHeight = macdLayout.height;
+    const onMove = (ev) => {
+      const dy = ev.clientY - startY;
+      const delta = macdLayout.position === 'top' ? dy : -dy;
+      macdLayout.height = Math.max(MACD_MIN_HEIGHT, Math.min(MACD_MAX_HEIGHT, startHeight + delta));
+      resizeChartsForMacdLayout();
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      persistMacdLayout();
     };
     document.addEventListener('mousemove', onMove);
     document.addEventListener('mouseup', onUp);
@@ -2077,6 +2155,7 @@ function applyMacdSettings() {
 }
 
 function createMacdChart() {
+  applyMacdLayout(); // apply saved height/position before (re)creating the chart
   macdChartEl.innerHTML = '';
   macdChart = LightweightCharts.createChart(macdChartEl, {
     layout: {
@@ -2183,7 +2262,19 @@ function calculateRSI(bars, period = 14) {
   const out = [];
   let avgGain = null, avgLoss = null;
   for (let i = 0; i < bars.length; i++) {
-    if (i === 0) continue;
+    if (i === 0) {
+      // RSI is undefined for the very first bar (no prior close to diff
+      // against), but the series still needs a point at bars[0] so its
+      // logical index 0 lines up with bars[0] - same as the main chart
+      // and MACD. WITHOUT this leading whitespace, RSI's data started at
+      // bars[1], shifting its whole logical index by one, so a same-TF
+      // range passthrough landed RSI one bar off from the other panes
+      // (the persistent "RSI out of sync by 1 bar" - main/MACD compute a
+      // value for every bar so they were never shifted). A whitespace
+      // point ({time} only, no value) reserves the slot and draws nothing.
+      out.push({ time: bars[i].time });
+      continue;
+    }
     const change = bars[i].close - bars[i - 1].close;
     const gain = Math.max(change, 0);
     const loss = Math.max(-change, 0);
@@ -3173,6 +3264,21 @@ function renderMacdSettingsPanel() {
     addRow('Line', styleSelect);
   }
 
+  addSectionHeader('Pane');
+  const positionSelect = document.createElement('select');
+  [['bottom', 'Bottom'], ['top', 'Top']].forEach(([v, label]) => {
+    const opt = document.createElement('option');
+    opt.value = v; opt.textContent = label;
+    if (v === macdLayout.position) opt.selected = true;
+    positionSelect.appendChild(opt);
+  });
+  positionSelect.addEventListener('change', () => {
+    macdLayout.position = positionSelect.value;
+    resizeChartsForMacdLayout();
+    persistMacdLayout();
+  });
+  addRow('Position', positionSelect);
+
   addSectionHeader('MACD Line');
   styleRows(macdSettings.macd);
   addSectionHeader('Signal Line');
@@ -3199,6 +3305,11 @@ function renderMacdSettingsPanel() {
     e.stopPropagation();
     macdSettings = loadMacdSettings();
     applyMacdSettings();
+    // Reset pane height to factory (position left as-is, same as RSI's
+    // Restore Default behaviour).
+    macdLayout.height = MACD_LAYOUT_FACTORY_DEFAULT.height;
+    resizeChartsForMacdLayout();
+    persistMacdLayout();
     renderMacdSettingsPanel();
   });
   actionsRow.appendChild(restoreDefaultBtn);

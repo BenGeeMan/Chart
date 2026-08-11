@@ -1065,7 +1065,7 @@
       <div id="earnings-overlay"></div>
       <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">102</div>
+      <div id="build-number">103</div>
       <div id="main-no-data">No Data</div>
       <div id="rsi-settings-overlay"></div>
       <div id="macd-settings-overlay"></div>
@@ -3202,12 +3202,12 @@ document.querySelectorAll('#legend .ind-row[data-series]').forEach(row => {
   makeDraggable(panel, panel.querySelector('.panel-drag-handle'));
 
   const hide = () => panel.classList.remove('show');
-  // Right-click either turnover box opens the styling popup (and NOT the
-  // chart's Reset/Center menu - stopPropagation blocks the bubble up).
-  ['turnover-box', 'turnover-box-daily'].forEach((id) => {
-    const boxEl = document.getElementById(id);
-    if (!boxEl) return;
-    boxEl.addEventListener('contextmenu', (e) => {
+  // Right-click the "Turnover" row in the Indicators menu opens the styling
+  // popup. contextmenu (not a normal click) so it doesn't toggle the
+  // show/hide checkbox; stopPropagation keeps it from closing the menu.
+  const turnoverRow = document.querySelector('.ind-row[data-series="turnoverbox"]');
+  if (turnoverRow) {
+    turnoverRow.addEventListener('contextmenu', (e) => {
       e.preventDefault();
       e.stopPropagation();
       syncInputs();
@@ -3215,7 +3215,7 @@ document.querySelectorAll('#legend .ind-row[data-series]').forEach(row => {
       panel.style.top = Math.min(e.clientY, window.innerHeight - 130) + 'px';
       panel.classList.add('show');
     });
-  });
+  }
   document.addEventListener('click', hide);
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') hide(); });
 

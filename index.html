@@ -234,22 +234,35 @@
     cursor: pointer;
     background: none;
   }
-  .turnover-style {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px 8px;
-    align-items: center;
-    padding: 2px 0 4px 22px;
-    font-size: 10px;
-    color: var(--text-dim);
+  #turnover-settings {
+    position: fixed;
+    z-index: 1000;
+    display: none;
+    background: #ffffff;
+    border: 1px solid var(--panel-border);
+    border-radius: 6px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.16);
+    padding: 10px;
+    font-size: 11px;
+    color: var(--text);
+    width: 190px;
+    user-select: none;
   }
-  .turnover-style label { display: inline-flex; align-items: center; gap: 3px; }
-  .turnover-style input[type=color] {
-    width: 20px; height: 15px; padding: 0;
+  #turnover-settings.show { display: block; }
+  #turnover-settings .row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 6px;
+  }
+  #turnover-settings .row:last-child { margin-bottom: 0; }
+  #turnover-settings label { color: var(--text-dim); }
+  #turnover-settings input[type=color] {
+    width: 32px; height: 18px; padding: 0;
     border: 1px solid var(--panel-border); border-radius: 3px; cursor: pointer; background: none;
   }
-  .turnover-style input[type=range] { width: 54px; }
-  .turnover-transp { flex-basis: 100%; }
+  #turnover-settings input[type=range] { width: 90px; }
   #rsi-drawing-overlay, #macd-drawing-overlay {
     position: absolute;
     inset: 0;
@@ -1035,11 +1048,6 @@
             <label class="ind-row" data-series="rsi"><input type="checkbox" checked><span class="swatch" style="background:#131722"></span>RSI (14)</label>
             <label class="ind-row" data-series="macd"><input type="checkbox" checked><span class="swatch" style="background:#2962ff"></span>MACD (12,26,9)</label>
             <label class="ind-row" data-series="turnoverbox"><input type="checkbox" checked>Turnover</label>
-            <div class="turnover-style">
-              <label title="Background colour">Bg<input type="color" id="turnover-bg-color"></label>
-              <label title="Text colour">Txt<input type="color" id="turnover-text-color"></label>
-              <label title="Background transparency" class="turnover-transp">α<input type="range" id="turnover-bg-opacity" min="0" max="100"></label>
-            </div>
           </div>
         </div>
       </div>
@@ -1057,7 +1065,7 @@
       <div id="earnings-overlay"></div>
       <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">101</div>
+      <div id="build-number">102</div>
       <div id="main-no-data">No Data</div>
       <div id="rsi-settings-overlay"></div>
       <div id="macd-settings-overlay"></div>
@@ -1107,6 +1115,13 @@
 <div id="chart-context-menu">
   <div class="ctx-item" data-action="reset">Reset chart</div>
   <div class="ctx-item" data-action="center">Center chart</div>
+</div>
+
+<div id="turnover-settings">
+  <div class="panel-drag-handle">Turnover box</div>
+  <div class="row"><label>Background</label><input type="color" id="turnover-bg-color"></div>
+  <div class="row"><label>Text</label><input type="color" id="turnover-text-color"></div>
+  <div class="row"><label>Transparency</label><input type="range" id="turnover-bg-opacity" min="0" max="100"></div>
 </div>
 
 <script>
@@ -3167,16 +3182,43 @@ document.querySelectorAll('#legend .ind-row[data-series]').forEach(row => {
 // colour, background transparency. Live-apply + persist. Also reflect the
 // saved show/hide state onto the box + its checkbox at startup.
 (function setupTurnoverStyleControls() {
+  const panel = document.getElementById('turnover-settings');
   const bg = document.getElementById('turnover-bg-color');
   const txt = document.getElementById('turnover-text-color');
   const op = document.getElementById('turnover-bg-opacity');
-  if (!bg || !txt || !op) return;
-  bg.value = turnoverStyle.bgColor;
-  txt.value = turnoverStyle.textColor;
-  op.value = Math.round(turnoverStyle.bgOpacity * 100);
+  if (!panel || !bg || !txt || !op) return;
+  const syncInputs = () => {
+    bg.value = turnoverStyle.bgColor;
+    txt.value = turnoverStyle.textColor;
+    op.value = Math.round(turnoverStyle.bgOpacity * 100);
+  };
+  syncInputs();
   bg.addEventListener('input', () => { turnoverStyle.bgColor = bg.value; applyTurnoverStyle(); persistTurnoverStyle(); });
   txt.addEventListener('input', () => { turnoverStyle.textColor = txt.value; applyTurnoverStyle(); persistTurnoverStyle(); });
   op.addEventListener('input', () => { turnoverStyle.bgOpacity = parseInt(op.value, 10) / 100; applyTurnoverStyle(); persistTurnoverStyle(); });
+  panel.addEventListener('mousedown', (e) => e.stopPropagation());
+  panel.addEventListener('click', (e) => e.stopPropagation());
+  panel.addEventListener('contextmenu', (e) => { e.preventDefault(); e.stopPropagation(); });
+  makeDraggable(panel, panel.querySelector('.panel-drag-handle'));
+
+  const hide = () => panel.classList.remove('show');
+  // Right-click either turnover box opens the styling popup (and NOT the
+  // chart's Reset/Center menu - stopPropagation blocks the bubble up).
+  ['turnover-box', 'turnover-box-daily'].forEach((id) => {
+    const boxEl = document.getElementById(id);
+    if (!boxEl) return;
+    boxEl.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      syncInputs();
+      panel.style.left = Math.min(e.clientX, window.innerWidth - 210) + 'px';
+      panel.style.top = Math.min(e.clientY, window.innerHeight - 130) + 'px';
+      panel.classList.add('show');
+    });
+  });
+  document.addEventListener('click', hide);
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') hide(); });
+
   const cb = document.querySelector('.ind-row[data-series="turnoverbox"] input');
   if (cb) cb.checked = turnoverStyle.visible;
   applyTurnoverStyle();

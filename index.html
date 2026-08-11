@@ -952,7 +952,7 @@
       <div id="earnings-overlay"></div>
       <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">87</div>
+      <div id="build-number">88</div>
       <div id="main-no-data">No Data</div>
       <div id="rsi-settings-overlay"></div>
       <div id="macd-settings-overlay"></div>
@@ -1041,7 +1041,16 @@ const chart = LightweightCharts.createChart(chartEl, {
     horzLines: { visible: false },
   },
   crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
-  rightPriceScale: { borderColor: '#e0e3eb', mode: LightweightCharts.PriceScaleMode.Logarithmic },
+  // minimumWidth pins the right price-scale width so the main chart and
+  // both indicator panes reserve the SAME axis width. Without it each pane
+  // auto-sizes to its own labels (price ~"32.00" = 52px, RSI "120.00" =
+  // 60px), so their plot areas differ in width and the same date lands at
+  // a different x in each pane - the panes look horizontally out of sync
+  // even when perfectly range-synced. 64 clears the widest label. NOTE:
+  // minimumWidth is only honored at createChart time in this Lightweight
+  // Charts build, not via runtime applyOptions - so it lives in the
+  // creation options of all three charts (here, createRsiChart, createMacdChart).
+  rightPriceScale: { borderColor: '#e0e3eb', mode: LightweightCharts.PriceScaleMode.Logarithmic, minimumWidth: 64 },
   timeScale: { borderColor: '#e0e3eb', timeVisible: false },
 });
 
@@ -1853,7 +1862,7 @@ function createRsiChart() {
       horzLines: { visible: false },
     },
     crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
-    rightPriceScale: { borderColor: '#e0e3eb' },
+    rightPriceScale: { borderColor: '#e0e3eb', minimumWidth: 64 }, // see main chart's note on minimumWidth
     timeScale: { visible: false },
     width: rsiChartEl.clientWidth,
     height: rsiChartEl.clientHeight,
@@ -2077,7 +2086,7 @@ function createMacdChart() {
     },
     grid: { vertLines: { visible: false }, horzLines: { visible: false } },
     crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
-    rightPriceScale: { borderColor: '#e0e3eb' },
+    rightPriceScale: { borderColor: '#e0e3eb', minimumWidth: 64 }, // see main chart's note on minimumWidth
     timeScale: { visible: false },
     width: macdChartEl.clientWidth,
     height: macdChartEl.clientHeight,

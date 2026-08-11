@@ -197,6 +197,28 @@
     pointer-events: none;
   }
   .pane-resize-handle:hover::after { background: var(--accent); }
+  #chart-context-menu {
+    position: fixed;
+    z-index: 1000;
+    display: none;
+    background: #ffffff;
+    border: 1px solid var(--panel-border);
+    border-radius: 6px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.16);
+    padding: 4px;
+    min-width: 140px;
+    font-size: 13px;
+    user-select: none;
+  }
+  #chart-context-menu.show { display: block; }
+  #chart-context-menu .ctx-item {
+    padding: 6px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    color: var(--text);
+    white-space: nowrap;
+  }
+  #chart-context-menu .ctx-item:hover { background: rgba(41,98,255,0.1); color: var(--accent); }
   #rsi-drawing-overlay, #macd-drawing-overlay {
     position: absolute;
     inset: 0;
@@ -981,7 +1003,7 @@
       <div id="earnings-overlay"></div>
       <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">97</div>
+      <div id="build-number">98</div>
       <div id="main-no-data">No Data</div>
       <div id="rsi-settings-overlay"></div>
       <div id="macd-settings-overlay"></div>
@@ -1026,6 +1048,11 @@
 
   <textarea id="input-box" style="display:none;"></textarea>
   <textarea id="output-box" readonly style="display:none;"></textarea>
+</div>
+
+<div id="chart-context-menu">
+  <div class="ctx-item" data-action="reset">Reset chart</div>
+  <div class="ctx-item" data-action="center">Center chart</div>
 </div>
 
 <script>
@@ -1463,6 +1490,21 @@ function reassertIndicatorRange(pane, targetFrom, targetTo, mainData, mainTF) {
   lastAppliedRange.set(pane, applied);
   lastAppliedAt.set(pane, performance.now());
   pane.chart().timeScale().setVisibleLogicalRange(applied);
+}
+
+// Force every live indicator pane onto the main chart's current visible
+// range. A belt-and-suspenders reconcile for the INITIAL PAGE LOAD, where
+// the main chart's and each indicator's data fetches resolve in an
+// unpredictable order (and briefly share the suppressSync flag), so an
+// indicator can occasionally set its starting view before main's is
+// settled - it then looks out of sync until the first scroll runs the
+// sync. Scheduling this a few times after load guarantees final alignment,
+// exactly as a manual scroll would. Idempotent and cheap.
+function resyncIndicatorsToMain() {
+  const r = chart.timeScale().getVisibleLogicalRange();
+  if (!r || !barsData.length) return;
+  if (rsiChart && rsiBarsData.length) reassertIndicatorRange(rsiSyncPane, r.from, r.to, barsData, currentTF);
+  if (macdChart && macdBarsData.length) reassertIndicatorRange(macdSyncPane, r.from, r.to, barsData, currentTF);
 }
 
 // Builds a short, flat "last value carried forward" segment bridging
@@ -2685,6 +2727,16 @@ function renderEarningsOverlay() {
   }
 }
 
+// How many candles show on EITHER side of the anchor for every default
+// view: initial page load, timeframe change, and the "Reset chart" /
+// "Center chart" context-menu actions. Reset & the default view anchor on
+// the last real candle; Center anchors on the current middle candle. Tune
+// this single number to change how zoomed-in every default view is.
+const CANDLES_EACH_SIDE = 100;
+function candleWindowAround(anchorIdx) {
+  return { from: anchorIdx - CANDLES_EACH_SIDE, to: anchorIdx + CANDLES_EACH_SIDE };
+}
+
 function loadTimeframe(tf) {
   const cfg = TIMEFRAME_META[tf];
   const file = `${currentTicker.toLowerCase()}_${tf}.json`;
@@ -2809,33 +2861,15 @@ function loadTimeframe(tf) {
       }
 
       chart.applyOptions({ timeScale: { timeVisible: cfg.intraday, borderColor: '#e0e3eb' } });
-      // targetFrom/targetTo (logical indices into `data`) are re-asserted
-      // once more below, after everything settles - see suppressSync.
-      let targetFrom, targetTo;
-      if (prevStartTime != null) {
-        // Reopen at the same calendar start date as before the switch,
-        // converted into the new timeframe's own time format, still
-        // extending through to the last (future) bar. Uses
-        // timeToLogicalIndex + setVisibleLogicalRange rather than
-        // setVisibleRange - see timeToLogicalIndex's own comment for why.
-        const newStartTime = convertTimeBetweenTF(prevStartTime, oldTF, tf);
-        targetFrom = timeToLogicalIndex(newStartTime, data);
-        targetTo = data.length - 1;
-      } else {
-        // No previous view to inherit from (initial page load) -
-        // fitContent() would zoom out to fit EVERY loaded bar, including
-        // all the flat future placeholder bars now appended for blank
-        // drawing space - that squashes the real candles down to make
-        // room for a wide stretch of empty flat line. Instead, default
-        // to showing an even split: as many real recent bars as there
-        // are future ones, so the initial view naturally looks like
-        // "half real data, half open space to draw into," with the
-        // option to scroll further into either side afterward.
-        const futureCount = data.length - 1 - realIdx;
-        const realBarsToShow = Math.max(futureCount, 20);
-        targetFrom = Math.max(0, realIdx - realBarsToShow);
-        targetTo = data.length - 1;
-      }
+      // Default view: CANDLES_EACH_SIDE candles either side of the last real
+      // bar - the same window "Reset chart" gives. Applied on initial load
+      // AND on every timeframe change, so the number of candles shown is
+      // consistent (this replaced the older "preserve start date across a TF
+      // switch" / "half real, half future" behaviour - git history has it if
+      // that's ever wanted back). Re-asserted once more below after
+      // everything settles - see suppressSync.
+      const w0 = candleWindowAround(realIdx);
+      let targetFrom = w0.from, targetTo = w0.to;
       chart.timeScale().setVisibleLogicalRange({ from: targetFrom, to: targetTo });
 
       updateHeadlineStats(lastRealBarIndex(data));
@@ -5280,8 +5314,47 @@ function positionDailyBox() {
 }
 positionDailyBox();
 
+// Right-click context menu on the chart: "Reset chart" recenters on the
+// last real candle, "Center chart" recenters on the current middle candle
+// - both at the standard CANDLES_EACH_SIDE zoom. Setting the main chart's
+// range propagates to the indicator panes via the sync.
+(function setupChartContextMenu() {
+  const menu = document.getElementById('chart-context-menu');
+  const area = document.getElementById('main-chart-area');
+  if (!menu || !area) return;
+  const hide = () => menu.classList.remove('show');
+  area.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    menu.style.left = Math.min(e.clientX, window.innerWidth - 160) + 'px';
+    menu.style.top = Math.min(e.clientY, window.innerHeight - 80) + 'px';
+    menu.classList.add('show');
+  });
+  document.addEventListener('click', hide);
+  window.addEventListener('blur', hide);
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') hide(); });
+  menu.querySelectorAll('.ctx-item').forEach((item) => {
+    item.addEventListener('click', (e) => {
+      e.stopPropagation();
+      hide();
+      if (!barsData.length) return;
+      let anchor;
+      if (item.dataset.action === 'reset') {
+        anchor = lastRealBarIndex(barsData);
+      } else {
+        const r = chart.timeScale().getVisibleLogicalRange();
+        anchor = r ? Math.round((r.from + r.to) / 2) : lastRealBarIndex(barsData);
+      }
+      chart.timeScale().setVisibleLogicalRange(candleWindowAround(anchor));
+    });
+  });
+})();
+
 loadTimeframe('daily');
 loadDailySnapshot(currentTicker);
+// Reconcile the indicator panes to the main chart once everything's had
+// time to load and settle - fixes the intermittent "indicator out of sync
+// on refresh" race (see resyncIndicatorsToMain).
+[600, 1200, 2200].forEach(d => setTimeout(resyncIndicatorsToMain, d));
 </script>
 </body>
 </html>

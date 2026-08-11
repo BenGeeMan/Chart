@@ -201,7 +201,7 @@
   #rsi-settings-btn {
     position: absolute;
     top: 1px;
-    left: 270px;
+    left: 312px;
     z-index: 8;
     background: #ffffff;
     border: 1px solid var(--panel-border);
@@ -230,7 +230,7 @@
   #macd-settings-btn {
     position: absolute;
     top: 1px;
-    left: 325px;
+    left: 372px;
     z-index: 8;
     background: #ffffff;
     border: 1px solid var(--panel-border);
@@ -964,7 +964,7 @@
       <div id="earnings-overlay"></div>
       <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">93</div>
+      <div id="build-number">94</div>
       <div id="main-no-data">No Data</div>
       <div id="rsi-settings-overlay"></div>
       <div id="macd-settings-overlay"></div>
@@ -974,6 +974,7 @@
       <div id="rsi-label">RSI (14)</div>
       <button id="rsi-settings-btn" title="RSI settings">⚙</button>
       <div id="rsi-tf-buttons">
+        <button class="rsi-tf-btn" data-tf="chart">Chart</button>
         <button class="rsi-tf-btn" data-tf="m5">5m</button>
         <button class="rsi-tf-btn" data-tf="m15">15m</button>
         <button class="rsi-tf-btn" data-tf="hourly">1H</button>
@@ -991,6 +992,7 @@
       <div id="macd-label">MACD (12,26,9)</div>
       <button id="macd-settings-btn" title="MACD settings">⚙</button>
       <div id="macd-tf-buttons">
+        <button class="macd-tf-btn" data-tf="chart">Chart</button>
         <button class="macd-tf-btn" data-tf="m5">5m</button>
         <button class="macd-tf-btn" data-tf="m15">15m</button>
         <button class="macd-tf-btn" data-tf="hourly">1H</button>
@@ -1680,7 +1682,12 @@ let rsiExtensionSeries = null;
 // explicitly forcing every pane to the correct final state once things
 // settle, sidesteps the whole cascade rather than trying to out-guard it.
 let suppressSync = false;
-let rsiTF = 'daily'; // RSI's own timeframe - independent of the main chart's
+let rsiTF = 'daily'; // RSI's EFFECTIVE timeframe (the one actually plotted/synced)
+// When true (the default), RSI mirrors the main chart's timeframe: rsiTF is
+// kept equal to currentTF and follows it on every main-chart TF switch. The
+// "Chart" button turns this on; picking a specific TF turns it off and pins
+// RSI to that TF independently.
+let rsiFollowChart = true;
 
 // --- MACD pane state (the second indicator pane). Mirrors the RSI
 // pane's globals. macdChart is null until createMacdChart() runs (and
@@ -1693,7 +1700,8 @@ let macdLineSeries = null;    // MACD line (fast EMA - slow EMA)
 let macdSignalSeries = null;  // signal line (EMA of the MACD line)
 let macdHistSeries = null;    // histogram (MACD - signal)
 let macdBarsData = [];
-let macdTF = 'daily';         // MACD's own timeframe, independent of the main chart's
+let macdTF = 'daily';         // MACD's EFFECTIVE timeframe (actually plotted/synced)
+let macdFollowChart = true;   // mirror the main chart's timeframe by default (see rsiFollowChart)
 let macdEnabled = true;       // on/off via the Indicators column, mirrors rsiEnabled
 const macdChartEl = document.getElementById('macd-chart');
 
@@ -2013,7 +2021,7 @@ function createRsiChart() {
 // is what powers RSI having its own timeframe selector.
 function loadRsiData(tf) {
   rsiTF = tf;
-  document.querySelectorAll('.rsi-tf-btn').forEach(b => b.classList.toggle('active', b.dataset.tf === tf));
+  document.querySelectorAll('.rsi-tf-btn').forEach(b => b.classList.toggle('active', b.dataset.tf === (rsiFollowChart ? 'chart' : tf)));
   if (!rsiChart) return;
   fetch(`${currentTicker.toLowerCase()}_${tf}.json`)
     .then(r => r.json())
@@ -2098,7 +2106,10 @@ function loadRsiData(tf) {
 }
 
 document.querySelectorAll('.rsi-tf-btn').forEach(btn => {
-  btn.addEventListener('click', () => loadRsiData(btn.dataset.tf));
+  btn.addEventListener('click', () => {
+    if (btn.dataset.tf === 'chart') { rsiFollowChart = true; loadRsiData(currentTF); }
+    else { rsiFollowChart = false; loadRsiData(btn.dataset.tf); }
+  });
 });
 
 // ============================ MACD pane ============================
@@ -2235,7 +2246,7 @@ function createMacdChart() {
 // point 5); the histogram is real-bars-only, like the volume panel.
 function loadMacdData(tf) {
   macdTF = tf;
-  document.querySelectorAll('.macd-tf-btn').forEach(b => b.classList.toggle('active', b.dataset.tf === tf));
+  document.querySelectorAll('.macd-tf-btn').forEach(b => b.classList.toggle('active', b.dataset.tf === (macdFollowChart ? 'chart' : tf)));
   if (!macdChart) return;
   fetch(`${currentTicker.toLowerCase()}_${tf}.json`)
     .then(r => r.json())
@@ -2284,7 +2295,10 @@ function loadMacdData(tf) {
 }
 
 document.querySelectorAll('.macd-tf-btn').forEach(btn => {
-  btn.addEventListener('click', () => loadMacdData(btn.dataset.tf));
+  btn.addEventListener('click', () => {
+    if (btn.dataset.tf === 'chart') { macdFollowChart = true; loadMacdData(currentTF); }
+    else { macdFollowChart = false; loadMacdData(btn.dataset.tf); }
+  });
 });
 
 // The main chart's half of the sync is set up ONCE (it survives any
@@ -2720,6 +2734,13 @@ function loadTimeframe(tf) {
       // data, but the actual plotted series had just been silently
       // swapped out from under it, making any position/range math
       // against rsiBarsData meaningless.
+      // In "Chart" mode RSI mirrors the main chart's timeframe, so point its
+      // effective TF at the new one - the recompute below then runs (rsiTF
+      // now === tf) and RSI re-plots on the new timeframe automatically.
+      if (rsiSeries && rsiFollowChart) {
+        rsiTF = tf;
+        document.querySelectorAll('.rsi-tf-btn').forEach(b => b.classList.toggle('active', b.dataset.tf === 'chart'));
+      }
       if (rsiSeries && rsiTF === tf) {
         // Whitespace points for the future bars too - see the matching
         // comment in loadRsiData for why this isn't optional.
@@ -2742,6 +2763,10 @@ function loadTimeframe(tf) {
       // rather than a shared helper, is one of the parity gaps the MACD
       // build surfaced). Only overwrites MACD's plotted data when its own
       // timeframe matches, so a MACD pinned to a different TF is left alone.
+      if (macdChart && macdFollowChart) {
+        macdTF = tf;
+        document.querySelectorAll('.macd-tf-btn').forEach(b => b.classList.toggle('active', b.dataset.tf === 'chart'));
+      }
       if (macdChart && macdTF === tf) {
         const { macd, signal, hist } = calculateMACD(realData);
         const future = data.slice(realIdx + 1).map(d => ({ time: d.time }));
@@ -2853,8 +2878,10 @@ function switchTicker(ticker) {
   }
   loadTimeframe(currentTF);
   loadDailySnapshot(ticker);
-  if (rsiChart) loadRsiData(currentTF);
-  if (macdChart) loadMacdData(currentTF);
+  // Reload each indicator on its effective TF - the chart's TF when following,
+  // otherwise its own pinned TF (don't reset a pinned indicator on ticker switch).
+  if (rsiChart) loadRsiData(rsiFollowChart ? currentTF : rsiTF);
+  if (macdChart) loadMacdData(macdFollowChart ? currentTF : macdTF);
   refreshAllEnabledMtfEmas();
   refreshAllEnabledRelEmas();
 }

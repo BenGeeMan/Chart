@@ -197,26 +197,41 @@ the pane).
 
 ---
 
-## 4. The cross-pane sync model (main chart ↔ RSI)
+## 4. The cross-pane sync model (main ↔ indicator panes)
 
 The hardest and least-obvious subsystem. Full *why* is handoff §7; this
-is the *contract* a reimplementation must satisfy. It keeps two
-independent Lightweight Charts instances (main + RSI) showing the same
-calendar-time window even when they are on **different timeframes**.
+is the *contract* a reimplementation must satisfy. It keeps N independent
+Lightweight Charts instances (main + each indicator pane — currently RSI
+and MACD) showing the same calendar-time window even when each is on a
+**different timeframe**.
 
-### 4.0 Shared core (`applyCrossPaneRange`)
-The two directional handlers (main→RSI, RSI→main) are no longer
-copy-pasted bodies — both call one pane-agnostic core,
-`applyCrossPaneRange(src, dst, range)` (~L1123). A "pane" is a descriptor
-of three **getters** — `{ chart(), bars(), getTF() }` — so one descriptor
-reads live state forever (`rsiChart` is reassigned on toggle-off/on,
-`barsData`/`rsiBarsData` on every load, `currentTF`/`rsiTF` on TF switch).
-Two descriptors exist: `mainSyncPane` and `rsiSyncPane` (~L1163). A future
-second indicator pane adds its own same-shape descriptor and participates
-in the same sync — this is the factoring-out that handoff §0 item 3 asked
-for (partially done: the *core range mapping* is now generic; the
-subscription wiring, guards, and the `loadRsiData`/`loadTimeframe`
-init-view + reassert blocks are still written in explicit main/RSI terms).
+### 4.0 Generalized N-pane sync
+Sync is now pane-count-agnostic. A "pane" is a descriptor of three
+**getters** — `{ chart(), bars(), getTF() }` — so one descriptor reads
+live state forever (`rsiChart`/`macdChart` are reassigned on toggle-off/on,
+the bars arrays on every load, the TFs on switch). The registry
+`syncPanes = [mainSyncPane, rsiSyncPane, macdSyncPane]` (~L1228) holds one
+descriptor per pane. Three functions carry the model:
+- `applyCrossPaneRange(src, dst, range)` (~L1123) — maps one pane's
+  visible range onto another (same-TF passthrough vs. cross-TF
+  calendar conversion). The pane-agnostic core.
+- `broadcastRange(srcPane, range)` (~L1245) — each pane's timeScale
+  subscription calls this; it pushes the range to every *other* live pane
+  via `applyCrossPaneRange`. One `syncInProgress` flag (reset one frame
+  later) guards the whole burst — replacing the old pairwise
+  `syncingFromMain`/`syncingFromRsi` booleans, which did **not**
+  generalize (a change from RSI would reach main but not propagate on to
+  MACD). `suppressSync` still hard-mutes during TF-switch transitions.
+- `reassertIndicatorRange(pane, from, to, mainData, mainTF)` (~L1262) —
+  the settle-then-reassert step in `loadTimeframe`, one call per indicator
+  pane instead of a copy-pasted block.
+
+**Adding an indicator pane = one descriptor in `syncPanes` + its
+subscription calling `broadcastRange`.** MACD is exactly that. This is
+what handoff §0 item 3 asked for; the sync layer is now genuinely
+reusable. Still hand-mirrored per pane (not yet shared): the data-load +
+init-view function (`loadMacdData` ≈ `loadRsiData`) and `loadTimeframe`'s
+recompute-on-match block — see §4.4.
 
 ### 4.1 State flags (~L1345)
 ```js
@@ -262,9 +277,35 @@ generically (indicator-agnostic) so a future second indicator pane can
 reuse it. Styled via `rsiSettings.extension` (§3.1). Returns `[]` when
 no bridge is needed. **Known accepted gap:** its target doesn't
 live-recompute when the *main* chart's TF changes while RSI is pinned to
-a different TF (handoff §0 item 8).
+a different TF (handoff §0 item 8). MACD does **not** have a gap-extension
+line yet (deferred — §4.4).
 
----
+### 4.4 MACD pane — the second indicator, and what it reused
+The MACD pane (`createMacdChart`, `loadMacdData`, `calculateMACD`, ~L1852+)
+was built as a near-clone of RSI to test the abstraction. Integration
+points, mirroring RSI exactly:
+- **DOM:** `#macd-chart-container` — third child of `#chart-pane`, fixed
+  140px, below RSI. Own `.macd-tf-btn` timeframe selector.
+- **State globals:** `macdChart`, `macdLineSeries`/`macdSignalSeries`/
+  `macdHistSeries`, `macdBarsData`, `macdTF` (~L1484+).
+- **Sync:** one descriptor (`macdSyncPane`) in `syncPanes`; subscription
+  calls `broadcastRange`. Zero sync-specific code (§4.0).
+- **Future space:** the two line series whitespace-pad the future region;
+  the histogram is real-bars-only (§5).
+- **loadTimeframe:** a recompute-on-`macdTF===tf` block + a
+  `reassertIndicatorRange(macdSyncPane, …)` call.
+- **switchTicker:** `if (macdChart) loadMacdData(currentTF)`.
+
+**Reused cleanly** (the payoff): `applyCrossPaneRange`/`broadcastRange`/
+`reassertIndicatorRange` (sync), `calculateEMA` (math),
+`lastRealBarIndex` + whitespace pattern (future), and the time/index
+converters. **Hand-mirrored, not shared** (the remaining parity debt):
+`loadMacdData` ≈ `loadRsiData`, and the `loadTimeframe` recompute block —
+these two would benefit from an `IndicatorPane` factory next, the way
+`createDrawingPane` already unifies the drawing tools. **Deferred for
+MACD** (RSI has them, MACD doesn't yet): settings panel, drawing tools,
+gap-extension line, on/off toggle + legend row, resize/reposition/persist
+layout, protocol twins (`MACD_*`), Chart-State output, screenshot capture.
 
 ## 5. Future-space rendering policy
 
@@ -295,6 +336,9 @@ Present in JSON export: `ema_10/20/50/100`, `turnover`,
 - **Volume EMA 3 / 20** — export only had *turnover* EMAs; panel plots
   share volume, so these are recomputed.
 - **RSI(14)** — never exported.
+- **MACD(12,26,9)** — never exported; `calculateMACD` builds it from
+  `calculateEMA` on close (fast/slow EMA → MACD line → EMA-of-MACD signal
+  → histogram).
 - **Every-Timeframe EMA / Relative EMA overlays** — each re-fetches that
   timeframe's raw file and computes EMA(10) fresh on toggle.
 
@@ -319,11 +363,21 @@ Grep by name; line numbers drift. Grouped by role.
 - `extrapolatePrice(t1,p1,t2,p2,target,isLog)` ~L2766 — **log-scale
   aware**; linear price math in log space is a recurring bug class.
 
-**Sync**
-- `applyCrossPaneRange(src, dst, range)` ~L1123 — shared core (§4.0); both
-  directional handlers call it. `mainSyncPane`/`rsiSyncPane` descriptors ~L1163.
+**Sync** (§4.0)
+- `applyCrossPaneRange(src, dst, range)` ~L1123 — pane-agnostic core.
+- `broadcastRange(srcPane, range)` ~L1245 — push a source pane's range to
+  all other live panes; `syncInProgress` guard. Every pane subscription
+  calls this.
+- `reassertIndicatorRange(pane, from, to, mainData, mainTF)` ~L1262 —
+  per-pane settle-then-reassert used by `loadTimeframe`.
 - `sourceVisibleTime(sourceChart, range, bars, tf)` ~L1114 — §4.2 inv. 2.
 - `buildLastValueExtension(lastRealPoint, targetTime)` ~L1147 — §4.3.
+- Descriptors: `mainSyncPane`/`rsiSyncPane`/`macdSyncPane` +
+  `syncPanes` ~L1228.
+
+**Indicator panes**
+- RSI: `createRsiChart`, `loadRsiData`, `calculateRSI`.
+- MACD: `createMacdChart`, `loadMacdData`, `calculateMACD` ~L1852+.
 
 **Bars / future space**
 - `lastRealBarIndex(bars)` ~L1985 — scans backward for first non-zero

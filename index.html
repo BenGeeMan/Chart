@@ -246,6 +246,50 @@
     width: 100%;
     height: 100%;
   }
+  /* MACD pane - a SECOND indicator pane, deliberately built as a near-
+     clone of the RSI pane's container to test how reusable that pattern
+     is (see CHART_HANDOFF.md Section 0 item 3). Kept intentionally
+     simpler than RSI for now: no resize handle, settings gear, or
+     drawing overlay yet - see the parity notes in the handoff. */
+  #macd-chart-container {
+    position: relative;
+    flex: none;
+    height: 140px;
+    border-top: 1px solid var(--panel-border);
+  }
+  #macd-chart-container.hidden { display: none; }
+  #macd-chart { width: 100%; height: 100%; }
+  #macd-label {
+    position: absolute;
+    top: 4px;
+    left: 12px;
+    z-index: 5;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text);
+    pointer-events: none;
+    user-select: none;
+  }
+  #macd-tf-buttons {
+    position: absolute;
+    top: 1px;
+    left: 120px;
+    z-index: 5;
+    display: flex;
+    gap: 1px;
+  }
+  .macd-tf-btn {
+    background: transparent;
+    color: var(--text-dim);
+    border: none;
+    border-radius: 3px;
+    padding: 2px 6px;
+    font-size: 10px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .macd-tf-btn:hover { background: rgba(0,0,0,0.05); color: var(--text); }
+  .macd-tf-btn.active { background: rgba(41,98,255,0.1); color: var(--accent); }
   #chart {
     width: 100%;
     height: 100%;
@@ -447,7 +491,7 @@
     z-index: 3;
     user-select: none;
   }
-  #main-no-data, #rsi-no-data {
+  #main-no-data, #rsi-no-data, #macd-no-data {
     display: none;
     position: absolute;
     top: 50%;
@@ -461,7 +505,8 @@
   }
   #main-no-data { font-size: 40px; }
   #rsi-no-data { font-size: 22px; }
-  #main-no-data.show, #rsi-no-data.show { display: block; }
+  #macd-no-data { font-size: 22px; }
+  #main-no-data.show, #rsi-no-data.show, #macd-no-data.show { display: block; }
   #earnings-overlay {
     position: absolute;
     inset: 0;
@@ -884,7 +929,7 @@
       <div id="earnings-overlay"></div>
       <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">83</div>
+      <div id="build-number">84</div>
       <div id="main-no-data">No Data</div>
       <div id="rsi-settings-overlay"></div>
     </div>
@@ -904,6 +949,20 @@
       <div id="rsi-chart"></div>
       <div id="rsi-drawing-overlay"></div>
       <div id="rsi-no-data">No Data</div>
+    </div>
+    <div id="macd-chart-container">
+      <div id="macd-label">MACD (12,26,9)</div>
+      <div id="macd-tf-buttons">
+        <button class="macd-tf-btn" data-tf="m5">5m</button>
+        <button class="macd-tf-btn" data-tf="m15">15m</button>
+        <button class="macd-tf-btn" data-tf="hourly">1H</button>
+        <button class="macd-tf-btn" data-tf="daily">D</button>
+        <button class="macd-tf-btn" data-tf="weekly">W</button>
+        <button class="macd-tf-btn" data-tf="monthly">M</button>
+        <button class="macd-tf-btn" data-tf="quarterly">Q</button>
+      </div>
+      <div id="macd-chart"></div>
+      <div id="macd-no-data">No Data</div>
     </div>
   </div>
 
@@ -1162,12 +1221,68 @@ function applyCrossPaneRange(src, dst, range) {
   }
 }
 
-// The two pane descriptors the sync handlers pass to applyCrossPaneRange.
+// The pane descriptors the sync handlers pass to applyCrossPaneRange.
 // Defined once here; their getters read live globals (see the comment on
-// applyCrossPaneRange). A future second indicator pane would add its own
-// descriptor of the same shape and participate in the same sync.
-const mainSyncPane = { chart: () => chart,    bars: () => barsData,    getTF: () => currentTF };
-const rsiSyncPane  = { chart: () => rsiChart, bars: () => rsiBarsData, getTF: () => rsiTF };
+// applyCrossPaneRange). Adding a new indicator pane = add its descriptor
+// of the same { chart(), bars(), getTF() } shape to syncPanes below, and
+// have its own timeScale subscription call broadcastRange(itsPane, range).
+// That's the whole sync-wiring cost of a new pane now - the MACD pane
+// (macdSyncPane) is exactly that: one more descriptor in the list.
+const mainSyncPane = { chart: () => chart,     bars: () => barsData,     getTF: () => currentTF };
+const rsiSyncPane  = { chart: () => rsiChart,  bars: () => rsiBarsData,  getTF: () => rsiTF };
+const macdSyncPane = { chart: () => macdChart, bars: () => macdBarsData, getTF: () => macdTF };
+const syncPanes = [mainSyncPane, rsiSyncPane, macdSyncPane];
+
+// Broadcasts one pane's just-changed visible range to every OTHER pane
+// that currently exists (a pane whose chart() is null is toggled off and
+// skipped). This replaced the old pairwise main<->RSI model (two
+// per-direction boolean guards, syncingFromMain/syncingFromRsi), which
+// did not generalize: with three panes, a change originating in RSI would
+// reach main but main's own guard would then stop it propagating on to
+// MACD, leaving MACD silently out of sync. A single in-progress flag
+// covers any number of panes: when a change fires, we mark syncing,
+// push to all others, and the range-change events THOSE pushes trigger
+// are ignored (flag still up) so nothing bounces. The one-frame-deferred
+// reset is the SAME cascade fix the pairwise guards used - right after a
+// data swap the library emits a burst of intermediate range-change events
+// over several frames; resetting synchronously would let a late one slip
+// through unguarded (see CHART_HANDOFF.md Section 7 point 3). suppressSync
+// still hard-mutes everything during a timeframe-switch transition.
+let syncInProgress = false;
+function broadcastRange(srcPane, range) {
+  if (suppressSync || !range || syncInProgress) return;
+  syncInProgress = true;
+  for (const dst of syncPanes) {
+    if (dst === srcPane || !dst.chart()) continue;
+    applyCrossPaneRange(srcPane, dst, range);
+  }
+  requestAnimationFrame(() => { syncInProgress = false; });
+}
+
+// Forces one indicator pane to the main chart's target logical range,
+// converting through calendar time when the pane is on a different
+// timeframe. Used by loadTimeframe's settle-then-reassert step (the
+// suppressSync cascade fix), where the range is asserted explicitly
+// rather than via broadcastRange because sync is muted at that moment.
+// Factored out so each indicator pane is one call, not a copy-pasted
+// block - the reassert logic was the RSI-specific duplication a second
+// pane would otherwise have forced yet another copy of.
+function reassertIndicatorRange(pane, targetFrom, targetTo, mainData, mainTF) {
+  if (!pane.chart()) return;
+  const paneTF = pane.getTF();
+  if (paneTF === mainTF) {
+    pane.chart().timeScale().setVisibleLogicalRange({ from: targetFrom, to: targetTo });
+    return;
+  }
+  const fromT = logicalIndexToTFTime(targetFrom, mainData, mainTF);
+  const toT = logicalIndexToTFTime(targetTo, mainData, mainTF);
+  if (fromT != null && toT != null) {
+    pane.chart().timeScale().setVisibleLogicalRange({
+      from: timeToLogicalIndex(convertTimeBetweenTF(fromT, mainTF, paneTF), pane.bars()),
+      to: timeToLogicalIndex(convertTimeBetweenTF(toT, mainTF, paneTF), pane.bars()),
+    });
+  }
+}
 
 // Builds a short, flat "last value carried forward" segment bridging
 // the gap between an indicator's own last REAL (completed) bar and some
@@ -1392,24 +1507,33 @@ let rsiSeries = null;
 // buildLastValueExtension() - deliberately written generically so any
 // future indicator pane can reuse the same pattern, not just RSI.
 let rsiExtensionSeries = null;
-let syncingFromMain = false, syncingFromRsi = false;
-// While true, BOTH sync handlers below no-op unconditionally. Needed
-// because right after a timeframe switch (either pane), the chart
-// library's own internal reconciliation of the new data fires a
-// CASCADE of several intermediate, transitional range-change events
-// over multiple frames - not just one - as candlesticks/EMAs/etc. each
-// settle. The existing per-direction syncingFromMain/syncingFromRsi
-// guards only protect against a single immediate bounce-back; with a
-// multi-event cascade, an unrelated event can slip through the gap
-// between one guard resetting and the next one being set, corrupting
-// the range with a stale intermediate value (confirmed via direct
-// console instrumentation - a real, reproducible sequence of ~10
-// overlapping fire/bounce events). Silencing sync entirely during the
-// transition, then explicitly forcing both panes to the correct final
-// state once things settle, sidesteps the whole cascade rather than
-// trying to out-guard it.
+// The per-direction sync guards that used to live here
+// (syncingFromMain/syncingFromRsi) were replaced by the single
+// syncInProgress flag + broadcastRange() up near applyCrossPaneRange -
+// see that comment for the full rationale (they didn't generalize past
+// two panes). suppressSync stays here: while true, broadcastRange no-ops
+// unconditionally. Needed because right after a timeframe switch (any
+// pane), the chart library's own reconciliation of the new data fires a
+// CASCADE of intermediate range-change events over multiple frames - not
+// just one. Silencing sync entirely during the transition, then
+// explicitly forcing every pane to the correct final state once things
+// settle, sidesteps the whole cascade rather than trying to out-guard it.
 let suppressSync = false;
 let rsiTF = 'daily'; // RSI's own timeframe - independent of the main chart's
+
+// --- MACD pane state (the second indicator pane). Mirrors the RSI
+// pane's globals. macdChart is null until createMacdChart() runs (and
+// would be null again if a future on/off toggle tore it down, same as
+// rsiChart). macdBarsData holds whatever timeframe's raw bars are
+// currently plotted, so index/time math stays consistent - same
+// contract as rsiBarsData. ---
+let macdChart = null;
+let macdLineSeries = null;    // MACD line (fast EMA - slow EMA)
+let macdSignalSeries = null;  // signal line (EMA of the MACD line)
+let macdHistSeries = null;    // histogram (MACD - signal)
+let macdBarsData = [];
+let macdTF = 'daily';         // MACD's own timeframe, independent of the main chart's
+const macdChartEl = document.getElementById('macd-chart');
 
 // --- RSI's own settings: the RSI line's color/thickness/line-type, and
 // three optional reference lines (Upper/Lower/Middle), each with its
@@ -1647,36 +1771,12 @@ function createRsiChart() {
   rsiUpperHandle = null; rsiLowerHandle = null; rsiMiddleHandle = null;
   applyRsiSettings();
 
-  // Syncs pan/zoom to the main chart. When both panes share the same
-  // timeframe (the common case), the logical (bar-index) range is
-  // passed straight through - exact, no rounding. Converting through
-  // calendar-date strings instead here would lose sub-bar precision for
-  // daily-and-up timeframes (a date string has no fractional-day
-  // component), snapping the range to whole-bar boundaries on every
-  // single drag frame and making the chart visibly stretch/jitter
-  // instead of panning smoothly. Only fall back to time-based
-  // conversion (convertTimeBetweenTF) when RSI's own independent
-  // timeframe selector actually differs from the main chart's, since
-  // bar index isn't comparable across different timeframes at all.
-  rsiChart.timeScale().subscribeVisibleLogicalRangeChange(range => {
-    if (suppressSync || !range || syncingFromMain) return;
-    syncingFromRsi = true;
-    // Source = RSI, destination = main. All the same-TF-passthrough vs.
-    // cross-TF calendar-conversion logic (and the setVisibleLogicalRange-
-    // not-setVisibleRange reasoning) lives in applyCrossPaneRange now.
-    applyCrossPaneRange(rsiSyncPane, mainSyncPane, range);
-    // Resetting this synchronously right after the call above assumes
-    // the main chart's own range-change event (which the guard exists
-    // to suppress) fires SYNCHRONOUSLY within that call - true most of
-    // the time, but confirmed FALSE right after a series.setData() call
-    // (e.g. a timeframe switch just finished loading): the resulting
-    // event can fire on a LATER frame, by which point this flag had
-    // already flipped back to false, so it went unguarded and bounced a
-    // stale value back to this chart, corrupting the just-set range.
-    // Deferring the reset by a frame keeps the guard up through that
-    // window too.
-    requestAnimationFrame(() => { syncingFromRsi = false; });
-  });
+  // Syncs pan/zoom with every other pane via the shared broadcastRange.
+  // The same-TF-passthrough vs. cross-TF calendar-conversion logic, the
+  // in-progress guard, and the deferred reset all live in
+  // broadcastRange/applyCrossPaneRange now (see their comments) - this
+  // subscription just says "when RSI's range changes, broadcast it".
+  rsiChart.timeScale().subscribeVisibleLogicalRangeChange(range => broadcastRange(rsiSyncPane, range));
 
   loadRsiData(rsiTF);
 }
@@ -1774,23 +1874,146 @@ document.querySelectorAll('.rsi-tf-btn').forEach(btn => {
   btn.addEventListener('click', () => loadRsiData(btn.dataset.tf));
 });
 
-// The main chart's half of the sync is set up ONCE (it survives RSI
-// being destroyed/recreated) - guarded so it does nothing if rsiChart
-// doesn't currently exist (RSI is switched off). Same same-timeframe
-// fast path as RSI's half above - exact logical-range passthrough when
-// possible, calendar-time conversion only when timeframes differ.
-chart.timeScale().subscribeVisibleLogicalRangeChange(range => {
-  if (suppressSync || !range || syncingFromRsi || !rsiChart) return;
-  syncingFromMain = true;
-  // Source = main, destination = RSI - the mirror of RSI's half above,
-  // through the same shared applyCrossPaneRange core.
-  applyCrossPaneRange(mainSyncPane, rsiSyncPane, range);
-  // Deferred reset - see the matching comment on RSI's half of the sync
-  // (above, in createRsiChart) for why a synchronous reset isn't safe.
-  requestAnimationFrame(() => { syncingFromMain = false; });
+// ============================ MACD pane ============================
+// The second indicator pane. Structurally a near-clone of the RSI pane
+// (own chart instance, own timeframe, whitespace-padded future region,
+// participates in the shared broadcastRange sync) - built this way
+// deliberately to see how much of the RSI machinery actually generalizes.
+// What reused cleanly: applyCrossPaneRange/broadcastRange (sync),
+// lastRealBarIndex + the whitespace-padding pattern (future space),
+// calculateEMA (the math), convertTimeBetweenTF/timeToLogicalIndex/
+// logicalIndexToTFTime (the init-view positioning). What is still
+// RSI-specific and had to be hand-mirrored rather than shared: the
+// data-load + init-view function (loadMacdData ~= loadRsiData), the
+// loadTimeframe recompute+reassert blocks, and switchTicker's reload.
+// See CHART_HANDOFF.md for the full parity accounting.
+
+// MACD line = fastEMA - slowEMA (of close); signal = EMA of the MACD
+// line; histogram = MACD - signal. Computed over whatever bars are
+// passed (callers pass REAL bars only, then whitespace-pad the future).
+function calculateMACD(bars, fast = 12, slow = 26, signalPeriod = 9) {
+  if (!bars.length) return { macd: [], signal: [], hist: [] };
+  const emaFast = calculateEMA(bars, fast);
+  const emaSlow = calculateEMA(bars, slow);
+  const macd = bars.map((b, i) => ({ time: b.time, value: emaFast[i].value - emaSlow[i].value }));
+  // Signal is an EMA of the MACD line itself - seeded the same way
+  // calculateEMA seeds (first value = first point), kept inline since
+  // calculateEMA works on bar objects with a named price field, not on
+  // an already-computed {time,value} series.
+  const k = 2 / (signalPeriod + 1);
+  let prev = null;
+  const signal = macd.map(m => {
+    prev = prev === null ? m.value : m.value * k + prev * (1 - k);
+    return { time: m.time, value: prev };
+  });
+  const hist = macd.map((m, i) => {
+    const v = m.value - signal[i].value;
+    return { time: m.time, value: v, color: v >= 0 ? 'rgba(38,166,154,0.5)' : 'rgba(239,83,80,0.5)' };
+  });
+  return { macd, signal, hist };
+}
+
+function createMacdChart() {
+  macdChartEl.innerHTML = '';
+  macdChart = LightweightCharts.createChart(macdChartEl, {
+    layout: {
+      background: { color: '#ffffff' },
+      textColor: '#131722',
+      fontFamily: "-apple-system, 'Trebuchet MS', Roboto, Helvetica, Arial, sans-serif",
+    },
+    grid: { vertLines: { visible: false }, horzLines: { visible: false } },
+    crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+    rightPriceScale: { borderColor: '#e0e3eb' },
+    timeScale: { visible: false },
+    width: macdChartEl.clientWidth,
+    height: macdChartEl.clientHeight,
+  });
+  // Histogram added FIRST so the two lines render on top of it. MACD
+  // auto-scales around zero (unlike RSI's fixed 0-100), so no
+  // autoscaleInfoProvider - the library's own auto-fit is what we want.
+  macdHistSeries = macdChart.addHistogramSeries({ priceLineVisible: false, lastValueVisible: false });
+  macdLineSeries = macdChart.addLineSeries({
+    color: '#2962ff', lineWidth: 2, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
+  });
+  macdSignalSeries = macdChart.addLineSeries({
+    color: '#ff6d00', lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
+  });
+  // MACD's half of the sync - same one line as RSI's now (see
+  // broadcastRange). This runs inside createMacdChart so it re-subscribes
+  // if the chart is ever torn down and recreated, same as RSI.
+  macdChart.timeScale().subscribeVisibleLogicalRangeChange(range => broadcastRange(macdSyncPane, range));
+  loadMacdData(macdTF);
+}
+
+// Fetches MACD's own data independently of the main chart (its own
+// timeframe selector), computes MACD, and displays it - the direct
+// mirror of loadRsiData. Whitespace-pads the future region on the two
+// LINE series (so this chart's timeScale reserves that time and sync
+// positioning has something to anchor to - CHART_HANDOFF.md Section 7
+// point 5); the histogram is real-bars-only, like the volume panel.
+function loadMacdData(tf) {
+  macdTF = tf;
+  document.querySelectorAll('.macd-tf-btn').forEach(b => b.classList.toggle('active', b.dataset.tf === tf));
+  if (!macdChart) return;
+  fetch(`${currentTicker.toLowerCase()}_${tf}.json`)
+    .then(r => r.json())
+    .then(data => {
+      if (!data || data.length === 0) {
+        document.getElementById('macd-no-data').classList.add('show');
+        macdLineSeries.setData([]); macdSignalSeries.setData([]); macdHistSeries.setData([]);
+        return;
+      }
+      document.getElementById('macd-no-data').classList.remove('show');
+      suppressSync = true;
+      macdBarsData = data;
+      const realIdx = lastRealBarIndex(data);
+      const realData = data.slice(0, realIdx + 1);
+      const { macd, signal, hist } = calculateMACD(realData);
+      const future = data.slice(realIdx + 1).map(d => ({ time: d.time }));
+      macdLineSeries.setData(macd.concat(future));
+      macdSignalSeries.setData(signal.concat(future));
+      macdHistSeries.setData(hist);
+      // Initial view = the main chart's current calendar window converted
+      // into MACD's own timeframe - identical approach to loadRsiData
+      // (logicalIndexToTFTime, not getVisibleRange, so it's correct even
+      // if main is zoomed past its own data; guarded on barsData having
+      // loaded, since on first page-load MACD's fetch can resolve before
+      // the main chart's does). loadTimeframe's own macdTF===tf branch
+      // recomputes correctly once main's data arrives.
+      const mainLogicalRange = chart.timeScale().getVisibleLogicalRange();
+      const fromT = (mainLogicalRange && barsData.length) ? logicalIndexToTFTime(mainLogicalRange.from, barsData, currentTF) : null;
+      const toT = (mainLogicalRange && barsData.length) ? logicalIndexToTFTime(mainLogicalRange.to, barsData, currentTF) : null;
+      if (fromT != null && toT != null) {
+        const targetFrom = timeToLogicalIndex(convertTimeBetweenTF(fromT, currentTF, tf), data);
+        const targetTo = timeToLogicalIndex(convertTimeBetweenTF(toT, currentTF, tf), data);
+        macdChart.timeScale().setVisibleLogicalRange({ from: targetFrom, to: targetTo });
+        // Same settle-then-reassert as loadRsiData/loadTimeframe.
+        const reassert = () => macdChart.timeScale().setVisibleLogicalRange({ from: targetFrom, to: targetTo });
+        requestAnimationFrame(() => requestAnimationFrame(reassert));
+        setTimeout(() => { reassert(); suppressSync = false; }, 250);
+      } else {
+        suppressSync = false;
+      }
+    })
+    .catch(() => {
+      document.getElementById('macd-no-data').classList.add('show');
+      setStatus(`Could not load ${currentTicker.toLowerCase()}_${tf}.json for MACD.`, true);
+    });
+}
+
+document.querySelectorAll('.macd-tf-btn').forEach(btn => {
+  btn.addEventListener('click', () => loadMacdData(btn.dataset.tf));
 });
 
+// The main chart's half of the sync is set up ONCE (it survives any
+// indicator pane being destroyed/recreated). broadcastRange handles
+// panes that don't currently exist (their chart() is null and they're
+// skipped), so no explicit rsiChart/macdChart guard is needed here - the
+// main chart broadcasts to whichever indicator panes happen to be on.
+chart.timeScale().subscribeVisibleLogicalRangeChange(range => broadcastRange(mainSyncPane, range));
+
 createRsiChart();
+createMacdChart();
 
 function calculateRSI(bars, period = 14) {
   const out = [];
@@ -2220,6 +2443,20 @@ function loadTimeframe(tf) {
         rsiBarsData = data;
       }
 
+      // Same recompute for MACD when it's following the main chart's
+      // timeframe - mirror of the RSI block above (this hand-mirroring,
+      // rather than a shared helper, is one of the parity gaps the MACD
+      // build surfaced). Only overwrites MACD's plotted data when its own
+      // timeframe matches, so a MACD pinned to a different TF is left alone.
+      if (macdChart && macdTF === tf) {
+        const { macd, signal, hist } = calculateMACD(realData);
+        const future = data.slice(realIdx + 1).map(d => ({ time: d.time }));
+        macdLineSeries.setData(macd.concat(future));
+        macdSignalSeries.setData(signal.concat(future));
+        macdHistSeries.setData(hist);
+        macdBarsData = data;
+      }
+
       chart.applyOptions({ timeScale: { timeVisible: cfg.intraday, borderColor: '#e0e3eb' } });
       // targetFrom/targetTo (logical indices into `data`) are re-asserted
       // once more below, after everything settles - see suppressSync.
@@ -2283,20 +2520,8 @@ function loadTimeframe(tf) {
       // window) makes sure OUR value is the one that wins the last word.
       const applyFinalRange = () => {
         chart.timeScale().setVisibleLogicalRange({ from: targetFrom, to: targetTo });
-        if (rsiChart) {
-          if (rsiTF === tf) {
-            rsiChart.timeScale().setVisibleLogicalRange({ from: targetFrom, to: targetTo });
-          } else {
-            const fromT = logicalIndexToTFTime(targetFrom, data, tf);
-            const toT = logicalIndexToTFTime(targetTo, data, tf);
-            if (fromT != null && toT != null) {
-              rsiChart.timeScale().setVisibleLogicalRange({
-                from: timeToLogicalIndex(convertTimeBetweenTF(fromT, tf, rsiTF), rsiBarsData),
-                to: timeToLogicalIndex(convertTimeBetweenTF(toT, tf, rsiTF), rsiBarsData),
-              });
-            }
-          }
-        }
+        reassertIndicatorRange(rsiSyncPane, targetFrom, targetTo, data, tf);
+        reassertIndicatorRange(macdSyncPane, targetFrom, targetTo, data, tf);
       };
       requestAnimationFrame(() => requestAnimationFrame(applyFinalRange));
       setTimeout(() => { applyFinalRange(); suppressSync = false; }, 250);
@@ -2335,6 +2560,7 @@ function switchTicker(ticker) {
   loadTimeframe(currentTF);
   loadDailySnapshot(ticker);
   if (rsiChart) loadRsiData(currentTF);
+  if (macdChart) loadMacdData(currentTF);
   refreshAllEnabledMtfEmas();
   refreshAllEnabledRelEmas();
 }

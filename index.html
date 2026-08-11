@@ -180,6 +180,23 @@
     background: transparent;
   }
   #rsi-resize-handle:hover { background: rgba(41,98,255,0.15); }
+  /* Faint grip line so the drag-to-resize edge is discoverable. Shared
+     class - any pane with a .pane-resize-handle gets it (RSI, MACD, and any
+     future indicator pane). Centered horizontal bar, very subtle at rest,
+     stronger on hover. */
+  .pane-resize-handle::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: 34px;
+    height: 2px;
+    border-radius: 2px;
+    background: rgba(0,0,0,0.14);
+    pointer-events: none;
+  }
+  .pane-resize-handle:hover::after { background: var(--accent); }
   #rsi-drawing-overlay, #macd-drawing-overlay {
     position: absolute;
     inset: 0;
@@ -964,13 +981,13 @@
       <div id="earnings-overlay"></div>
       <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">95</div>
+      <div id="build-number">96</div>
       <div id="main-no-data">No Data</div>
       <div id="rsi-settings-overlay"></div>
       <div id="macd-settings-overlay"></div>
     </div>
     <div id="rsi-chart-container">
-      <div id="rsi-resize-handle" title="Drag to resize"></div>
+      <div id="rsi-resize-handle" class="pane-resize-handle" title="Drag to resize"></div>
       <div id="rsi-label">RSI (14)</div>
       <button id="rsi-settings-btn" title="RSI settings">⚙</button>
       <div id="rsi-tf-buttons">
@@ -988,7 +1005,7 @@
       <div id="rsi-no-data">No Data</div>
     </div>
     <div id="macd-chart-container">
-      <div id="macd-resize-handle" title="Drag to resize"></div>
+      <div id="macd-resize-handle" class="pane-resize-handle" title="Drag to resize"></div>
       <div id="macd-label">MACD (12,26,9)</div>
       <button id="macd-settings-btn" title="MACD settings">⚙</button>
       <div id="macd-tf-buttons">

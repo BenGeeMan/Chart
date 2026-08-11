@@ -38,7 +38,27 @@ not just this once** — treat it as standing practice, not a one-off.
 
 ## 0. NEXT SESSION PRIORITIES (read this first)
 
-**Session update (builds 82 → 94).** Large session. Completed and live:
+**Session update (builds 82 → 103).** Large session. Later builds
+(95 → 103) added, on top of everything below:
+- **MACD drawing tools** on the shared toolbar (`macdPane` via
+  `createDrawingPane` + `MACD_*` protocol twins) — MACD now at full parity
+  with RSI.
+- **Pane priority** (0–99) controlling top/bottom ordering; **resize-handle
+  grip line**; **"Chart" follow-TF mode** as the indicator default.
+- **Context menu** (right-click) Reset/Center, and a **unified default
+  view** — one `CANDLES_EACH_SIDE` knob for initial load, TF change, and
+  the menu actions (replaced preserve-start-date / half-future logic).
+- **Init-sync reconcile** (`resyncIndicatorsToMain`) fixing the intermittent
+  "indicator out of sync on refresh".
+- **Volume bar colours** and **turnover-box styling** (bg/transparency/text,
+  opened by right-clicking the Turnover row in the Indicators menu), both
+  persisted.
+- **2-column settings panels** (RSI + MACD) — now the standard for menus.
+- New localStorage keys: `macdLayout_v1`, `volumeColors_v1`,
+  `turnoverStyle_v1` (+ `priority` in the layout keys). See Tech Ref §3, §9a,
+  §9b for all of the above.
+
+Earlier in this session (builds 82 → 94):
 - **`CHART_TECHNICAL_REFERENCE.md` written** (was item 1) — the standalone
   rebuild spec: data/localStorage schemas, the sync model, constant
   tables, function map. Kept current through this whole session; it is now

@@ -28,7 +28,7 @@ mandates. Line numbers below are written as *approximate anchors*
 is the durable locator, not the number.
 
 All anchors below refer to `index.html` unless stated otherwise. Build
-number at time of writing: **94**.
+number at time of writing: **103**.
 
 ---
 
@@ -141,10 +141,12 @@ future space) from historical ones.
 
 ## 3. localStorage formats
 
-Three independent keys, all versioned `_v1`, all best-effort (wrapped in
+Several independent keys, all versioned `_v1`, all best-effort (wrapped in
 try/catch — private browsing / disabled storage falls back to
-in-memory, feature still works for the session). All three are keyed by
-constants, never bare strings.
+in-memory, feature still works for the session). All are keyed by
+constants, never bare strings: `rsiSettings_v1`, `rsiLayout_v1`,
+`chartToolDefaults_v1`, `macdSettings_v1`, `macdLayout_v1`,
+`volumeColors_v1`, `turnoverStyle_v1`.
 
 ### 3.1 `rsiSettings_v1` — RSI indicator styling
 
@@ -214,15 +216,44 @@ Default via the MACD settings gear.
 
 ### 3.5 `rsiLayout_v1` / `macdLayout_v1` — pane geometry
 
-Each pane persists `{ height, position }` where `position` is
-`'bottom' | 'top'`. `RSI_LAYOUT_FACTORY_DEFAULT = { height: 150, position:
-'bottom' }`; `MACD_LAYOUT_FACTORY_DEFAULT = { height: 140, position:
-'bottom' }`. Height is mouse-resizable (drag handle, 80–500px) and
-persists immediately; position is a Top/Bottom dropdown in each pane's
-settings gear. Applied via `applyRsiLayout`/`applyMacdLayout`, which set
-the container's CSS `order` relative to `#main-chart-area` (order 0):
-top = `-1`, bottom = `1`, so both indicator panes can dock above or below
-main independently.
+Each pane persists `{ height, position, priority }`. `position` is
+`'bottom' | 'top'`; `priority` is 0–99. Factory defaults:
+`{ height: 150, position: 'bottom', priority: 10 }` (RSI) and
+`{ height: 140, position: 'bottom', priority: 20 }` (MACD). Height is
+mouse-resizable (drag handle, 80–500px, persists immediately); position and
+priority are controls in each pane's settings gear (Pane section).
+
+**Priority ordering** (build 97): the shared `paneOrderValue({position,
+priority})` maps a pane to a CSS flexbox `order` relative to
+`#main-chart-area` (order 0): top → `-(priority+1)`, bottom → `priority+1`.
+So among panes docked on the SAME side, LOWER priority sits NEARER the main
+chart (RSI 10 next to the chart, MACD 20 beyond it), each side ordered
+independently. Any future pane reuses `paneOrderValue`.
+
+**Resize handle grip** (build 96): the drag edge shows a faint centred grip
+line via the shared `.pane-resize-handle` class (`::after`) so it's
+discoverable. Future panes get it by adding that class to their handle.
+
+### 3.6 `volumeColors_v1` — volume bar colours
+
+`{ up, down }` hex colours for the volume histogram, applied at 45% opacity
+(`hexToRgba`). Default `{ up: '#26a69a', down: '#ef5350' }`. Up/down colour
+pickers live under the **Volume** row in the Indicators panel; a change
+re-tints live via `paintVolume()` (recolours from `barsData`, no reload —
+same pattern as `paintMacdHist`). `loadTimeframe` colours bars through the
+same `volumeBarColor()`.
+
+### 3.7 `turnoverStyle_v1` — turnover info-box styling
+
+`{ visible, bgColor, bgOpacity, textColor }` for the on-chart turnover
+boxes (`#turnover-box` current-TF + `#turnover-box-daily`). Default
+`{ visible: true, bgColor: '#ffffff', bgOpacity: 1, textColor: '#787b86' }`.
+`applyTurnoverStyle()` sets background (`hexToRgba`), text colour (cascaded
+onto the `.value`/`.label` spans), and display on both boxes. **UI:** a
+show/hide **Turnover** toggle in the Indicators column (`data-series=
+"turnoverbox"`); the colour/transparency controls open in a small draggable
+popup (`#turnover-settings`) on **right-clicking the Turnover menu row**
+(build 103 — was the box itself in 102).
 
 ---
 
@@ -508,6 +539,19 @@ Grep by name; line numbers drift. Grouped by role.
 - `lastRealBarIndex(bars)` ~L1985 — scans backward for first non-zero
   volume. **Use everywhere instead of `bars.length - 1`.**
 
+**View / layout / interaction**
+- `candleWindowAround(anchorIdx)` + `CANDLES_EACH_SIDE` — the default-view
+  window (§9a).
+- `resyncIndicatorsToMain()` — init-sync reconcile (§9a).
+- `paneOrderValue({position, priority})` — pane ordering (§3.5).
+- `resyncIndicatorsToMain` is scheduled from the init tail; the chart
+  context menu is `setupChartContextMenu` (IIFE).
+
+**Volume / turnover styling**
+- `paintVolume()` / `volumeBarColor(bar)` / `hexToRgba(hex, a)` — volume bar
+  colours (§3.6).
+- `applyTurnoverStyle()` — turnover box styling (§3.7).
+
 **Data load**
 - `loadTimeframe(tf)` ~L2102 — main chart TF load (fetches
   `{ticker}_{tf}.json`).
@@ -607,6 +651,41 @@ Rules a parser must enforce:
 - Not yet expressible: Rectangle, Arrow, Text, Price Range, Date Range,
   Date-and-Price Range, Path, Highlighter, Eraser (none built — §6 of
   handoff).
+
+---
+
+## 9a. Default view, context menu & init reconcile (build 98)
+
+**One default-view knob.** `CANDLES_EACH_SIDE = 100` and
+`candleWindowAround(anchorIdx)` → `{ from: anchor-100, to: anchor+100 }`.
+Used for every default view: initial page load, every timeframe change (in
+`loadTimeframe`, anchored on the last real bar), and the two context-menu
+actions. This **replaced** the older "preserve start date across a TF
+switch" / "half real, half future" logic — every default view now shows a
+consistent candle count. Tune the one constant to change the zoom.
+
+**Chart context menu.** Right-click `#main-chart-area` → `#chart-context-
+menu` (built at the end of the script). "Reset chart" recenters on the last
+real bar; "Center chart" recenters on the current middle bar — both via
+`candleWindowAround`, set on the main chart (propagates to indicators
+through the sync). Click-away / Escape closes it.
+
+**Init-sync reconcile.** `resyncIndicatorsToMain()` reasserts every live
+indicator to the main chart's current visible range. Scheduled at
+600/1200/2200 ms after load. Fixes an intermittent race where an
+indicator's data fetch resolves and sets its start view before the main
+chart's is settled (they briefly share `suppressSync`) — it looked out of
+sync until the first scroll; this reconciles it automatically.
+
+## 9b. Settings-panel layout — the 2-column standard (build 100–101)
+
+Indicator settings panels (RSI, MACD) use a short-and-wide **2-column**
+layout instead of one tall column that ran off the chart. The render adds a
+`.settings-body` (CSS `column-count: 2`) inside a `.settings-2col` panel
+(384px); each section is a `.settings-section-group` with
+`break-inside: avoid` so it's never split across columns. `addRow` appends
+to the current section group. **This is the standard for any future
+settings menu** — build it the same way.
 
 ---
 

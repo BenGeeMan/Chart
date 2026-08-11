@@ -403,9 +403,15 @@ at paint time via `paintMacdHist` + `macdHistRaw`); **pane position +
 resize** (`macdLayout_v1`, `applyMacdLayout` / `resizeChartsForMacdLayout`
 / `setupMacdResize` — §3.5); whitespace future padding; sync; and the
 **"Chart" follow-TF mode** (§4.5).
-**Still deferred for MACD** (RSI has them): drawing tools, gap-extension
-line, protocol twins (`MACD_*`), Chart-State style lines, screenshot
-capture.
+MACD also has the full **drawing toolset** (build 95): its own
+`createDrawingPane` instance (`macdPane`) on the *shared* toolbar +
+`sharedToolState` (same as main/RSI), attached/reset by `setMacdEnabled`,
+in the keydown chain and `clearAll`, with `MACD_LINE`/`MACD_TRENDLINE`/
+`MACD_RAY`/`MACD_HRAY` protocol twins and a "MACD Drawings" Chart-State
+section.
+**Still deferred for MACD** (RSI has them): the gap-extension line, and
+inclusion in the ✦ screenshot capture. (Style-beyond-color still isn't in
+the text protocol for *any* pane — §9.)
 
 ### 4.5 "Chart" timeframe (follow mode)
 Each indicator's TF row starts with a **"Chart"** button

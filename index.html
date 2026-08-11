@@ -952,7 +952,7 @@
       <div id="earnings-overlay"></div>
       <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">86</div>
+      <div id="build-number">87</div>
       <div id="main-no-data">No Data</div>
       <div id="rsi-settings-overlay"></div>
       <div id="macd-settings-overlay"></div>
@@ -1231,18 +1231,13 @@ function sourceVisibleTime(sourceChart, range, bars, tf) {
 // and position by logical index (setVisibleLogicalRange, never
 // setVisibleRange - the latter silently clamps a target time beyond the
 // destination's own loaded data; see timeToLogicalIndex's comment).
-// Pure: COMPUTES the logical range that dst should show to match src's
-// range, but does NOT apply it - the caller (broadcastRange) records the
-// result before setting it, so dst's own echoed range-change event can be
-// recognized and dropped. Returns null when there's nothing to apply.
-function computeCrossPaneRange(src, dst, range) {
-  const srcTF = src.getTF(), dstTF = dst.getTF();
-  if (srcTF === dstTF) return range;
-  const { from: fromT, to: toT } = sourceVisibleTime(src.chart(), range, src.bars(), srcTF);
-  if (fromT == null || toT == null) return null;
+// Converts a calendar-time window into the logical range dst should show.
+// tf is the timeframe the window's times are expressed in.
+function paneRangeForWindow(dst, fromT, toT, tf) {
+  const dstTF = dst.getTF();
   return {
-    from: timeToLogicalIndex(convertTimeBetweenTF(fromT, srcTF, dstTF), dst.bars()),
-    to: timeToLogicalIndex(convertTimeBetweenTF(toT, srcTF, dstTF), dst.bars()),
+    from: timeToLogicalIndex(convertTimeBetweenTF(fromT, tf, dstTF), dst.bars()),
+    to: timeToLogicalIndex(convertTimeBetweenTF(toT, tf, dstTF), dst.bars()),
   };
 }
 
@@ -1287,31 +1282,73 @@ const ECHO_WINDOW_MS = 150;
 function rangesClose(a, b) {
   return !!a && !!b && Math.abs(a.from - b.from) < 0.05 && Math.abs(a.to - b.to) < 0.05;
 }
+function recordApplied(pane, r) { lastAppliedRange.set(pane, r); lastAppliedAt.set(pane, performance.now()); }
+function isEcho(pane, range) {
+  // (a) BY VALUE - matches what we set (common, un-clamped case).
+  if (rangesClose(range, lastAppliedRange.get(pane))) return true;
+  // (b) BY RECENCY - we set this pane a moment ago and it's now reporting
+  //     the range it actually settled on, which may DIFFER from what we
+  //     asked if it clamped. Still an echo, not a user gesture.
+  const setAt = lastAppliedAt.get(pane);
+  return setAt != null && (performance.now() - setAt) < ECHO_WINDOW_MS;
+}
+
+// The main chart's data extent in calendar time - the HARD-LOCK bounds.
+// No pane may pan/zoom to show a time outside [first bar, last bar] of the
+// main chart's own data (last bar is the last future placeholder). This is
+// what keeps every pane on an IDENTICAL calendar window: a coarser-TF pane
+// (e.g. weekly) holds more history than main, but is not allowed to scroll
+// back past main's first bar, so it can never show a window main can't.
+function mainDataBounds() {
+  const b = barsData;
+  return b.length ? { loT: b[0].time, hiT: b[b.length - 1].time } : null;
+}
+
+// Broadcasts one pane's just-changed visible window to every OTHER live
+// pane, keeping all panes on the same calendar window. Steps: recognise
+// and drop echoes (isEcho); read the source's window in calendar time;
+// clamp it to the main chart's data extent (the hard-lock), snapping the
+// source pane back if it tried to go past; then apply the clamped window
+// to every other pane. Replaced the old pairwise main<->RSI model, which
+// did not generalize past two panes.
 function broadcastRange(srcPane, range) {
   if (suppressSync || !range || syncInProgress) return;
-  // Two ways srcPane's event can be an ECHO of a range WE set on it (from
-  // another pane's broadcast) rather than a fresh user gesture:
-  //  (a) BY VALUE - it matches what we set (the common, un-clamped case).
-  //  (b) BY RECENCY - we set this pane a moment ago and the library is
-  //      now reporting the range it actually settled on. This matters
-  //      when we asked for a range the pane CAN'T show (e.g. scrolling a
-  //      weekly pane far back asks the daily main chart to zoom out past
-  //      its min-bar-spacing cap); the pane CLAMPS to a different range,
-  //      so the echo's value won't match (a) - but it's still an echo,
-  //      not the user grabbing that pane. Without this, the clamped echo
-  //      gets rebroadcast and the two panes fight, ending up stuck at
-  //      different windows (the reported MACD-on-weekly scroll-back bug).
-  if (rangesClose(range, lastAppliedRange.get(srcPane))) return;
-  const setAt = lastAppliedAt.get(srcPane);
-  if (setAt != null && (performance.now() - setAt) < ECHO_WINDOW_MS) return;
+  if (isEcho(srcPane, range)) return;
   syncInProgress = true;
+
+  const srcTF = srcPane.getTF();
+  let { from: fromT, to: toT } = sourceVisibleTime(srcPane.chart(), range, srcPane.bars(), srcTF);
+
+  // HARD-LOCK: clamp the window to main's data extent (bounds expressed in
+  // srcTF for comparison against the source's own edge times).
+  const mb = mainDataBounds();
+  let clamped = false;
+  if (mb && fromT != null && toT != null) {
+    const loSrc = convertTimeBetweenTF(mb.loT, currentTF, srcTF);
+    const hiSrc = convertTimeBetweenTF(mb.hiT, currentTF, srcTF);
+    if (timeToNumeric(fromT) < timeToNumeric(loSrc)) { fromT = loSrc; clamped = true; }
+    if (timeToNumeric(toT) > timeToNumeric(hiSrc)) { toT = hiSrc; clamped = true; }
+    // If both edges got pushed the window could invert; guard it.
+    if (timeToNumeric(fromT) > timeToNumeric(toT)) { fromT = loSrc; toT = hiSrc; }
+  }
+
+  // If we clamped, snap the source pane itself back into the allowed window
+  // (so the user can't scroll it past main's data - it springs back).
+  if (clamped && fromT != null && toT != null) {
+    const st = paneRangeForWindow(srcPane, fromT, toT, srcTF);
+    recordApplied(srcPane, st);
+    srcPane.chart().timeScale().setVisibleLogicalRange(st);
+  }
+
   for (const dst of syncPanes) {
     if (dst === srcPane || !dst.chart()) continue;
-    const target = computeCrossPaneRange(srcPane, dst, range);
+    // Exact bar-index passthrough for a same-TF pane when nothing clamped -
+    // keeps a same-TF drag perfectly smooth (no calendar round-tripping).
+    let target;
+    if (dst.getTF() === srcTF && !clamped) target = range;
+    else if (fromT != null && toT != null) target = paneRangeForWindow(dst, fromT, toT, srcTF);
     if (!target) continue;
-    // Record BEFORE setting, so dst's synchronous echo already sees it.
-    lastAppliedRange.set(dst, target);
-    lastAppliedAt.set(dst, performance.now());
+    recordApplied(dst, target); // record BEFORE setting, so a sync echo is caught
     dst.chart().timeScale().setVisibleLogicalRange(target);
   }
   requestAnimationFrame(() => { syncInProgress = false; });

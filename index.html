@@ -981,7 +981,7 @@
       <div id="earnings-overlay"></div>
       <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">96</div>
+      <div id="build-number">97</div>
       <div id="main-no-data">No Data</div>
       <div id="rsi-settings-overlay"></div>
       <div id="macd-settings-overlay"></div>
@@ -1782,7 +1782,11 @@ function persistRsiSettings() {
 // per-tool style defaults where "what I'm previewing" and "what future
 // drawings use" are meaningfully different things).
 const RSI_LAYOUT_STORAGE_KEY = 'rsiLayout_v1';
-const RSI_LAYOUT_FACTORY_DEFAULT = { height: 150, position: 'bottom' };
+// priority (0-99): ordering among panes docked on the SAME side. Lower =
+// nearer the main chart (RSI 10 sits right next to the chart, MACD 20
+// sits beyond it). See applyRsiLayout / applyMacdLayout for how it maps to
+// CSS `order`.
+const RSI_LAYOUT_FACTORY_DEFAULT = { height: 150, position: 'bottom', priority: 10 };
 const RSI_MIN_HEIGHT = 80;
 const RSI_MAX_HEIGHT = 500;
 
@@ -1806,14 +1810,24 @@ function persistRsiLayout() {
   }
 }
 
+// Maps a pane's { position, priority } to a flexbox `order` relative to
+// #main-chart-area (order 0). Panes docked at the top get negative order
+// (above main), bottom get positive (below main). Within a side, LOWER
+// priority sits NEARER the main chart: a bottom pane's order grows with
+// priority (nearer chart = smaller order = higher up, just under main); a
+// top pane's order shrinks (more negative) with priority (nearer chart =
+// larger order = lower down, just above main). The +1 keeps priority 0 off
+// main's own order 0. Any future indicator pane reuses this.
+function paneOrderValue(layout) {
+  const p = Math.max(0, Math.min(99, layout.priority == null ? 10 : layout.priority));
+  return layout.position === 'top' ? -(p + 1) : (p + 1);
+}
+
 function applyRsiLayout() {
   const rsiContainer = document.getElementById('rsi-chart-container');
   if (!rsiContainer) return;
   rsiContainer.style.height = rsiLayout.height + 'px';
-  // order relative to #main-chart-area (order 0): top docks above, bottom
-  // below. Explicit +1 for bottom (not 0) so a second repositionable pane
-  // (MACD) can also dock above/below main without order collisions.
-  rsiContainer.style.order = rsiLayout.position === 'top' ? '-1' : '1';
+  rsiContainer.style.order = String(paneOrderValue(rsiLayout));
   // The resize handle always sits on whichever edge borders the main
   // chart, so dragging it always means "grow/shrink toward the main
   // chart" regardless of whether RSI is docked at the top or bottom.
@@ -1881,7 +1895,7 @@ function resizeChartsForRsiLayout() {
 // of the RSI layout system above (rsiLayout_v1 / applyRsiLayout / etc.).
 // Persisted separately under macdLayout_v1. ---
 const MACD_LAYOUT_STORAGE_KEY = 'macdLayout_v1';
-const MACD_LAYOUT_FACTORY_DEFAULT = { height: 140, position: 'bottom' };
+const MACD_LAYOUT_FACTORY_DEFAULT = { height: 140, position: 'bottom', priority: 20 };
 const MACD_MIN_HEIGHT = 80;
 const MACD_MAX_HEIGHT = 500;
 function loadMacdLayout() {
@@ -1898,7 +1912,7 @@ function applyMacdLayout() {
   const el = document.getElementById('macd-chart-container');
   if (!el) return;
   el.style.height = macdLayout.height + 'px';
-  el.style.order = macdLayout.position === 'top' ? '-1' : '1';
+  el.style.order = String(paneOrderValue(macdLayout));
   const handle = document.getElementById('macd-resize-handle');
   if (handle) {
     if (macdLayout.position === 'top') { handle.style.top = 'auto'; handle.style.bottom = '0'; }
@@ -3173,6 +3187,27 @@ function renderRsiSettingsPanel() {
   positionRow.appendChild(positionSelect);
   panel.appendChild(positionRow);
 
+  // Priority (0-99): ordering among panes on the same side; lower = nearer
+  // the main chart.
+  const priorityRow = document.createElement('div');
+  priorityRow.className = 'row';
+  const priorityLabel = document.createElement('label');
+  priorityLabel.textContent = 'Priority';
+  priorityRow.appendChild(priorityLabel);
+  const priorityInput = document.createElement('input');
+  priorityInput.type = 'number';
+  priorityInput.min = '0'; priorityInput.max = '99'; priorityInput.step = '1';
+  priorityInput.value = rsiLayout.priority;
+  priorityInput.addEventListener('mousedown', (e) => e.stopPropagation());
+  priorityInput.addEventListener('change', () => {
+    const v = parseInt(priorityInput.value, 10);
+    if (!isNaN(v)) { rsiLayout.priority = Math.max(0, Math.min(99, v)); priorityInput.value = rsiLayout.priority; }
+    resizeChartsForRsiLayout();
+    persistRsiLayout();
+  });
+  priorityRow.appendChild(priorityInput);
+  panel.appendChild(priorityRow);
+
   addSectionHeader('RSI Line');
   makeStyleRows(rsiSettings.line);
 
@@ -3259,6 +3294,7 @@ function renderRsiSettingsPanel() {
     // default" step like the styles above), so "restore default" here
     // means the factory size, not a previously-saved one.
     rsiLayout.height = RSI_LAYOUT_FACTORY_DEFAULT.height;
+    rsiLayout.priority = RSI_LAYOUT_FACTORY_DEFAULT.priority;
     resizeChartsForRsiLayout();
     persistRsiLayout();
     renderRsiSettingsPanel();
@@ -3363,6 +3399,20 @@ function renderMacdSettingsPanel() {
   });
   addRow('Position', positionSelect);
 
+  // Priority (0-99): ordering among same-side panes; lower = nearer the chart.
+  const priorityInput = document.createElement('input');
+  priorityInput.type = 'number';
+  priorityInput.min = '0'; priorityInput.max = '99'; priorityInput.step = '1';
+  priorityInput.value = macdLayout.priority;
+  priorityInput.addEventListener('mousedown', (e) => e.stopPropagation());
+  priorityInput.addEventListener('change', () => {
+    const v = parseInt(priorityInput.value, 10);
+    if (!isNaN(v)) { macdLayout.priority = Math.max(0, Math.min(99, v)); priorityInput.value = macdLayout.priority; }
+    resizeChartsForMacdLayout();
+    persistMacdLayout();
+  });
+  addRow('Priority', priorityInput);
+
   addSectionHeader('MACD Line');
   styleRows(macdSettings.macd);
   addSectionHeader('Signal Line');
@@ -3392,6 +3442,7 @@ function renderMacdSettingsPanel() {
     // Reset pane height to factory (position left as-is, same as RSI's
     // Restore Default behaviour).
     macdLayout.height = MACD_LAYOUT_FACTORY_DEFAULT.height;
+    macdLayout.priority = MACD_LAYOUT_FACTORY_DEFAULT.priority;
     resizeChartsForMacdLayout();
     persistMacdLayout();
     renderMacdSettingsPanel();

@@ -212,6 +212,18 @@ key, §8.2); `hist` is the histogram's up/down bar colors, applied at
 paint time so a live change re-tints without recompute. Set/Restore
 Default via the MACD settings gear.
 
+### 3.5 `rsiLayout_v1` / `macdLayout_v1` — pane geometry
+
+Each pane persists `{ height, position }` where `position` is
+`'bottom' | 'top'`. `RSI_LAYOUT_FACTORY_DEFAULT = { height: 150, position:
+'bottom' }`; `MACD_LAYOUT_FACTORY_DEFAULT = { height: 140, position:
+'bottom' }`. Height is mouse-resizable (drag handle, 80–500px) and
+persists immediately; position is a Top/Bottom dropdown in each pane's
+settings gear. Applied via `applyRsiLayout`/`applyMacdLayout`, which set
+the container's CSS `order` relative to `#main-chart-area` (order 0):
+top = `-1`, bottom = `1`, so both indicator panes can dock above or below
+main independently.
+
 ---
 
 ## 4. The cross-pane sync model (main ↔ indicator panes)
@@ -237,8 +249,14 @@ descriptor per pane. Three functions carry the model:
 - `broadcastRange(srcPane, range)` (~L1277) — each pane's timeScale
   subscription calls this; it pushes the range to every *other* live pane.
   Three guards against a destination pane's echo being mistaken for a
-  fresh user gesture: (1) `syncInProgress` (reset one frame later) blocks
-  synchronous re-entry; (2) **echo suppression by value** —
+  fresh user gesture: (1) `syncInProgress` blocks synchronous re-entry
+  (the re-entrant broadcasts that `setVisibleLogicalRange` triggers inside
+  the same call stack) — **reset SYNCHRONOUSLY at the end of
+  `broadcastRange`, not via rAF** (build 90): a deferred reset could be
+  starved during a rapid wheel-zoom burst and stay stuck `true`, freezing
+  every later broadcast so the indicator panes stopped following the main
+  chart's zoom. Late-arriving echoes are caught by (2)/(3), not by
+  `syncInProgress`; (2) **echo suppression by value** —
   `lastAppliedRange` (WeakMap pane→range) records what we set on each pane
   *before* setting it; an incoming range matching it (`rangesClose`, tol
   0.05 bar) is ignored — catches late echoes regardless of frame timing;
@@ -305,6 +323,35 @@ let rsiTF          = 'daily'; // RSI's own timeframe, independent of the main ch
    MUST whitespace-pad the same region** (§5) — otherwise its timeScale
    has no anchor for the future time and sync positioning lands
    somewhere wrong.
+6. **Hard-lock (build 87):** `broadcastRange` clamps every gesture's
+   window to `mainDataBounds()` (the main chart's first/last bar time), so
+   no pane can pan/zoom past the main chart's data. A coarser-TF pane
+   (weekly holds more history than daily) springs back at main's first
+   bar instead of showing history main lacks — this is what keeps all
+   panes on an identical calendar window.
+
+### 4.2a Horizontal alignment — SEPARATE from range sync
+Two bugs proved that identical *logical ranges* do **not** guarantee the
+panes line up horizontally. Both are rebuild-critical:
+
+- **Equal price-scale width (build 88).** Each chart auto-sizes its right
+  price scale to its own labels (price `32.00`→52px, RSI `120.00`→60px).
+  Different axis widths → different plot-area widths → the same date maps
+  to a different x per pane, offset *growing* toward the right edge. Fix:
+  set `rightPriceScale.minimumWidth` to a common value (64) on **all**
+  charts. **`minimumWidth` is only honored at `createChart` time in this
+  Lightweight Charts build** — runtime `applyOptions` and formatter
+  padding both do nothing (verified). So it lives in the creation options
+  of the main chart, `createRsiChart`, and `createMacdChart`.
+- **RSI leading whitespace (build 89).** `calculateRSI` can't compute a
+  value for bar 0 (no prior close). It used to `continue`, so the series
+  started at bars[1] and its logical index 0 mapped to bars[1] — the whole
+  RSI series shifted one bar, so a same-TF passthrough landed RSI one bar
+  off (MACD/main compute a value for *every* bar, so they never shifted).
+  Fix: `calculateRSI` emits a **whitespace point** `{ time: bars[0].time }`
+  (no value) at index 0 so it aligns with bars[0]. **Any per-bar indicator
+  that legitimately has no value at bar 0 must whitespace-pad index 0**,
+  or it desyncs by one bar.
 
 ### 4.3 Gap-extension line
 When RSI's own timeframe is coarser than the main chart's, RSI's last

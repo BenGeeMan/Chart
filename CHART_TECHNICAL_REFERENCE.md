@@ -28,7 +28,7 @@ mandates. Line numbers below are written as *approximate anchors*
 is the durable locator, not the number.
 
 All anchors below refer to `index.html` unless stated otherwise. Build
-number at time of writing: **82**.
+number at time of writing: **94**.
 
 ---
 
@@ -234,101 +234,105 @@ Lightweight Charts instances (main + each indicator pane — currently RSI
 and MACD) showing the same calendar-time window even when each is on a
 **different timeframe**.
 
-### 4.0 Generalized N-pane sync
-Sync is now pane-count-agnostic. A "pane" is a descriptor of three
-**getters** — `{ chart(), bars(), getTF() }` — so one descriptor reads
-live state forever (`rsiChart`/`macdChart` are reassigned on toggle-off/on,
-the bars arrays on every load, the TFs on switch). The registry
-`syncPanes = [mainSyncPane, rsiSyncPane, macdSyncPane]` (~L1228) holds one
-descriptor per pane. Three functions carry the model:
-- `applyCrossPaneRange(src, dst, range)` (~L1123) — maps one pane's
-  visible range onto another (same-TF passthrough vs. cross-TF
-  calendar conversion). The pane-agnostic core.
-- `computeCrossPaneRange(src, dst, range)` — **pure**; returns the range
-  dst should show, does not set it (so the caller can record it first).
-- `broadcastRange(srcPane, range)` (~L1277) — each pane's timeScale
-  subscription calls this; it pushes the range to every *other* live pane.
-  Three guards against a destination pane's echo being mistaken for a
-  fresh user gesture: (1) `syncInProgress` blocks synchronous re-entry
-  (the re-entrant broadcasts that `setVisibleLogicalRange` triggers inside
-  the same call stack) — **reset SYNCHRONOUSLY at the end of
-  `broadcastRange`, not via rAF** (build 90): a deferred reset could be
-  starved during a rapid wheel-zoom burst and stay stuck `true`, freezing
-  every later broadcast so the indicator panes stopped following the main
-  chart's zoom. Late-arriving echoes are caught by (2)/(3), not by
-  `syncInProgress`; (2) **echo suppression by value** —
-  `lastAppliedRange` (WeakMap pane→range) records what we set on each pane
-  *before* setting it; an incoming range matching it (`rangesClose`, tol
-  0.05 bar) is ignored — catches late echoes regardless of frame timing;
-  (3) **echo suppression by recency** — `lastAppliedAt` (WeakMap
-  pane→timestamp); an event from a pane we set within `ECHO_WINDOW_MS`
-  (150ms) is ignored *even if its value differs*. Guard (3) is essential
-  when we ask a pane for a range it CAN'T show — e.g. scrolling a weekly
-  pane far back asks the daily main chart to zoom out past its
-  min-bar-spacing cap, so main **clamps** to a different range; that
-  clamped echo's value won't match guard (2), and without (3) it gets
-  rebroadcast and the two panes fight, stuck at different windows (the
-  reported MACD-on-weekly scroll-back bug). Together these stop drift
-  under aggressive rapid wheel-zoom (cross-TF conversion is lossy, so any
-  un-suppressed round-trip accumulates error).
-  **Residual (not a bug):** a coarser-TF pane (weekly) holds more history
-  than a finer one (daily), and the daily chart cannot zoom out as far
-  (min-bar-spacing), so at full zoom-out the panes are right-edge aligned
-  but the coarse pane extends further left — a data-coverage limit, not a
-  sync fault. Replaced the old pairwise `syncingFromMain`/`syncingFromRsi`
-  booleans, which did **not** generalize (a change from RSI reached main
-  but not MACD). `suppressSync` still hard-mutes during TF-switch
-  transitions.
-- `reassertIndicatorRange(pane, from, to, mainData, mainTF)` (~L1262) —
-  the settle-then-reassert step in `loadTimeframe`, one call per indicator
-  pane instead of a copy-pasted block.
+### 4.0 N-pane sync — `broadcastRange`
+Sync is pane-count-agnostic. A "pane" is a descriptor of three **getters**
+— `{ chart(), bars(), getTF() }` — so one descriptor reads live state
+forever (`rsiChart`/`macdChart` are reassigned on toggle-off/on, the bars
+arrays on every load, the effective TFs on switch). The registry
+`syncPanes = [mainSyncPane, rsiSyncPane, macdSyncPane]` holds one per pane.
+Each pane's `timeScale().subscribeVisibleLogicalRangeChange` calls
+`broadcastRange(thatPane, range)`. **Adding a pane = one descriptor +
+one subscription line.**
 
-**Adding an indicator pane = one descriptor in `syncPanes` + its
-subscription calling `broadcastRange`.** MACD is exactly that. This is
-what handoff §0 item 3 asked for; the sync layer is now genuinely
-reusable. Still hand-mirrored per pane (not yet shared): the data-load +
-init-view function (`loadMacdData` ≈ `loadRsiData`) and `loadTimeframe`'s
-recompute-on-match block — see §4.4.
+`broadcastRange(srcPane, range)` (~L1338) is the whole model, in order:
 
-### 4.1 State flags (~L1345)
+1. **Hard-lock bounds** as logical indices *in the source's own bars*:
+   `[minIdx, maxIdx]` = `mainDataBounds()` (main's first/last bar times)
+   mapped through `timeToLogicalIndex(convertTimeBetweenTF(…))` into the
+   source's indexing. For a same-TF source that's `[0, lastBar]`; for a
+   coarser-TF source it's the sub-range overlapping main's data (so a
+   weekly pane can't scroll back past main's first daily bar).
+2. **Width-preserving clamp** of the incoming `range` into
+   `[minIdx, maxIdx]`: when an edge hits a bound, **slide** the whole
+   window rather than truncating that edge (only shrink if the window is
+   wider than the allowed span). Truncating one edge while the other kept
+   moving *shrank* the window, turning a pan at the boundary into a
+   runaway zoom-in (build 93 fix — "drag to the edge and it accelerates
+   away"). `clamped` = whether the range changed.
+3. **Echo check, but only when `!clamped`** (build 91). An out-of-bounds
+   (clamped) source MUST spring back regardless of whether the event looks
+   like an echo; in-bounds echoes are still dropped so nothing bounces.
+4. `syncInProgress = true`.
+5. If `clamped`, snap the source itself back to the clamped range
+   (`recordApplied` **before** the `setVisibleLogicalRange`, so the
+   source's own resulting event is recognised as an echo).
+6. Push to every other live pane: **same-TF → the source's exact logical
+   range** (identical bar indexing, no rounding); **cross-TF → convert**
+   the clamped window's edge times (`logicalIndexToTFTime` →
+   `convertTimeBetweenTF` → `timeToLogicalIndex`). `recordApplied` before
+   each set.
+7. `syncInProgress = false` — **synchronous** (build 90). A deferred
+   (rAF) reset could be starved during a rapid wheel-zoom burst and stay
+   stuck `true`, freezing every later broadcast (indicators stopped
+   following the zoom). `syncInProgress` only needs to block the
+   *synchronous* re-entrant broadcasts that step 6's sets trigger; any
+   later-frame echo is caught by the guards below instead.
+
+**Echo suppression** (`isEcho`, ~L1310) recognises a pane reporting a
+range *we* just set, so it isn't rebroadcast:
+- **by value** — `lastAppliedRange` (WeakMap pane→range) records what we
+  set; a match within `rangesClose` (tol 0.05 bar) is an echo. Catches
+  late echoes regardless of frame timing.
+- **by recency** — `lastAppliedAt` (WeakMap pane→timestamp); an event
+  from a pane we set within `ECHO_WINDOW_MS` (150ms) is an echo *even if
+  the value differs*. Needed when we ask a pane for a range it can't show
+  and it **clamps** to a different one (its clamped echo won't value-match)
+  — without this the panes fought.
+
+`reassertIndicatorRange(pane, from, to, mainData, mainTF)` (~L1428) is the
+settle-then-reassert step used by `loadTimeframe` (one call per pane).
+
+`suppressSync` still hard-mutes all of `broadcastRange` during a
+TF-switch transition. The old pairwise `syncingFromMain`/`syncingFromRsi`
+booleans are gone (didn't generalize past two panes). `sourceVisibleTime`
+and `paneRangeForWindow` remain defined but are **no longer called** (the
+build-93 rewrite clamps in logical space directly) — dead code, safe to
+delete.
+
+### 4.1 State (~L1300, ~L1683)
 ```js
-let syncingFromMain = false, syncingFromRsi = false; // per-direction re-entrancy guards
-let suppressSync   = false;   // hard mute of BOTH directions during a TF-switch transition
-let rsiTF          = 'daily'; // RSI's own timeframe, independent of the main chart's
+let syncInProgress = false;                 // synchronous re-entrancy guard
+const lastAppliedRange = new WeakMap();     // pane -> {from,to} we last set on it
+const lastAppliedAt    = new WeakMap();     // pane -> timestamp (ms) we last set it
+const ECHO_WINDOW_MS   = 150;
+let suppressSync = false;                    // hard-mute during TF-switch transitions
+let rsiTF = 'daily';  let rsiFollowChart = true;   // effective TF + "Chart" follow mode (§4.5)
+let macdTF = 'daily'; let macdFollowChart = true;
 ```
 
 ### 4.2 Invariants a rebuild must uphold
-1. **Position by logical index, never by time, for anything possibly
-   out of range.** `setVisibleRange()` (time-based) silently *clamps*
-   to the pane's own loaded data; `setVisibleLogicalRange()`
-   (index-based) accepts out-of-bounds indices and shows blank margin.
-   Convert time→index via `timeToLogicalIndex(time, bars)` first, then
-   call `setVisibleLogicalRange`.
-2. **Read each visible edge independently** via `sourceVisibleTime()`
-   — `getVisibleRange()`'s clamping is asymmetric between the past
-   (`from`) and future (`to`) edges. Trust it only for whichever edge
-   is still within the pane's own bars; extrapolate the other via
-   `logicalIndexToTFTime`.
-3. **A single synchronous boolean guard is insufficient.** A TF switch
-   fires a *cascade* (~10) of transitional range-change events over
-   several frames. Reset the per-direction guard a frame later
-   (`requestAnimationFrame`), AND use `suppressSync` to mute both
-   directions across the whole transition, then re-assert the final
-   state explicitly.
-4. **"Settled" is not reliably 2 animation frames.** The library
-   applies internal corrections (ResizeObserver-driven) outside paint
-   timing. Re-assert the final range once more after
-   `setTimeout(…, 250)` so the app's value wins last.
-5. **Any pane that truncates its real line for the future-space policy
-   MUST whitespace-pad the same region** (§5) — otherwise its timeScale
-   has no anchor for the future time and sync positioning lands
-   somewhere wrong.
-6. **Hard-lock (build 87):** `broadcastRange` clamps every gesture's
-   window to `mainDataBounds()` (the main chart's first/last bar time), so
-   no pane can pan/zoom past the main chart's data. A coarser-TF pane
-   (weekly holds more history than daily) springs back at main's first
-   bar instead of showing history main lacks — this is what keeps all
-   panes on an identical calendar window.
+1. **Position by logical index, never by time, for anything possibly out
+   of range.** `setVisibleRange()` (time-based) silently *clamps* to the
+   pane's own data; `setVisibleLogicalRange()` (index-based) accepts
+   out-of-bounds indices. Convert via `timeToLogicalIndex` first.
+2. **The hard-lock clamp is WIDTH-PRESERVING** — slide the window at a
+   bound, don't truncate an edge, or a boundary pan becomes a runaway
+   zoom-in.
+3. **Out-of-bounds always springs back; only in-bounds changes are
+   echo-suppressed.** (Echo check gated on `!clamped`.)
+4. **Reset `syncInProgress` synchronously.** A deferred reset can get
+   starved and stick, freezing sync.
+5. **Same-TF panes use exact logical-range passthrough; only cross-TF
+   converts through calendar time.** Calendar round-tripping a same-TF
+   pane adds rounding that at extreme zoom reads as "stretch".
+6. **`suppressSync` during a TF swap, then re-assert after settle.** A
+   data swap fires a cascade of transitional range events over several
+   frames, AND the library applies a late ResizeObserver-driven
+   correction outside paint timing — so `loadTimeframe` re-asserts the
+   final range after 2 rAFs **and** again after `setTimeout(…, 250)`.
+7. **Whitespace-pad the future region on any truncated series** (§5) —
+   and pad **index 0** on any per-bar indicator undefined at the first bar
+   (RSI), or it desyncs by one bar (§4.2a).
 
 ### 4.2a Horizontal alignment — SEPARATE from range sync
 Two bugs proved that identical *logical ranges* do **not** guarantee the
@@ -382,24 +386,41 @@ points, mirroring RSI exactly:
   `reassertIndicatorRange(macdSyncPane, …)` call.
 - **switchTicker:** `if (macdChart) loadMacdData(currentTF)`.
 
-**Reused cleanly** (the payoff): `computeCrossPaneRange`/`broadcastRange`/
-`reassertIndicatorRange` (sync), `calculateEMA` (math),
-`lastRealBarIndex` + whitespace pattern (future), and the time/index
-converters. **Hand-mirrored, not shared** (the remaining parity debt):
-`loadMacdData` ≈ `loadRsiData`, and the `loadTimeframe` recompute block —
-these two would benefit from an `IndicatorPane` factory next, the way
-`createDrawingPane` already unifies the drawing tools.
+**Reused cleanly** (the payoff): `broadcastRange`/`reassertIndicatorRange`
+(sync), `calculateEMA` (math), `lastRealBarIndex` + whitespace pattern
+(future), and the time/index converters. **Hand-mirrored, not shared**
+(the remaining parity debt): `loadMacdData` ≈ `loadRsiData`, and the
+`loadTimeframe` recompute block — these would benefit from an
+`IndicatorPane` factory, the way `createDrawingPane` already unifies the
+drawing tools.
 
-**MACD now at parity with RSI on:** Indicators-column row + on/off toggle
+**MACD at full parity with RSI on:** Indicators-column row + on/off toggle
 (`setMacdEnabled`, `data-series="macd"`; excluded from Chart-State text
-like RSI since it's visibly on/off), settings gear + panel
-(`renderMacdSettingsPanel`: MACD Line / Signal Line / Histogram sections,
-persisted to `macdSettings_v1` — §3.4), whitespace future padding, sync.
-Histogram bar colors are applied at paint time (`paintMacdHist` +
-`macdHistRaw`) so a live settings change re-tints without recompute.
+like RSI since it's visibly on/off); settings gear + panel
+(`renderMacdSettingsPanel`: Pane · Position / MACD Line / Signal Line /
+Histogram; persisted to `macdSettings_v1` — §3.4, histogram colors applied
+at paint time via `paintMacdHist` + `macdHistRaw`); **pane position +
+resize** (`macdLayout_v1`, `applyMacdLayout` / `resizeChartsForMacdLayout`
+/ `setupMacdResize` — §3.5); whitespace future padding; sync; and the
+**"Chart" follow-TF mode** (§4.5).
 **Still deferred for MACD** (RSI has them): drawing tools, gap-extension
-line, resize/reposition/persist layout (fixed 140px, bottom), protocol
-twins (`MACD_*`), Chart-State style lines, screenshot capture.
+line, protocol twins (`MACD_*`), Chart-State style lines, screenshot
+capture.
+
+### 4.5 "Chart" timeframe (follow mode)
+Each indicator's TF row starts with a **"Chart"** button
+(`data-tf="chart"`), the default. `rsiFollowChart`/`macdFollowChart`
+(default `true`) mean the indicator mirrors the main chart's timeframe:
+`rsiTF`/`macdTF` (the *effective* plotted/synced TF) are kept equal to
+`currentTF` and updated on every `loadTimeframe` switch, so the indicator
+re-plots on the new TF automatically. Clicking a specific TF sets
+`follow = false` and pins the indicator to that TF. `switchTicker` reloads
+each indicator on its effective TF (chart TF when following, else its
+pinned TF). Button highlight tracks `"chart"` while following. Both
+booleans are runtime-only (not persisted). **Note:** a pinned indicator
+on a much finer TF than the main view (e.g. 5m RSI while the chart shows
+2 years of Daily) can only cover its own short data span within the shared
+window — expected data-coverage behaviour, not a sync fault.
 
 ## 5. Future-space rendering policy
 
@@ -457,21 +478,25 @@ Grep by name; line numbers drift. Grouped by role.
 - `extrapolatePrice(t1,p1,t2,p2,target,isLog)` ~L2766 — **log-scale
   aware**; linear price math in log space is a recurring bug class.
 
-**Sync** (§4.0)
-- `applyCrossPaneRange(src, dst, range)` ~L1123 — pane-agnostic core.
-- `broadcastRange(srcPane, range)` ~L1245 — push a source pane's range to
-  all other live panes; `syncInProgress` guard. Every pane subscription
-  calls this.
-- `reassertIndicatorRange(pane, from, to, mainData, mainTF)` ~L1262 —
-  per-pane settle-then-reassert used by `loadTimeframe`.
-- `sourceVisibleTime(sourceChart, range, bars, tf)` ~L1114 — §4.2 inv. 2.
-- `buildLastValueExtension(lastRealPoint, targetTime)` ~L1147 — §4.3.
-- Descriptors: `mainSyncPane`/`rsiSyncPane`/`macdSyncPane` +
-  `syncPanes` ~L1228.
+**Sync** (§4.0) — all ~L1300–1440
+- `broadcastRange(srcPane, range)` — the whole model: width-preserving
+  hard-lock clamp, `!clamped` echo gate, same-TF exact / cross-TF convert,
+  synchronous `syncInProgress`. Every pane subscription calls this.
+- `isEcho(pane, range)` / `recordApplied(pane, r)` / `rangesClose(a, b)` —
+  value + recency echo suppression (`lastAppliedRange`/`lastAppliedAt`).
+- `mainDataBounds()` — the hard-lock bounds (main's first/last bar time).
+- `reassertIndicatorRange(pane, from, to, mainData, mainTF)` — per-pane
+  settle-then-reassert used by `loadTimeframe`.
+- Descriptors: `mainSyncPane`/`rsiSyncPane`/`macdSyncPane` + `syncPanes`.
+- `buildLastValueExtension(lastRealPoint, targetTime)` — §4.3.
+- **Dead (defined, uncalled):** `sourceVisibleTime`, `paneRangeForWindow`.
 
 **Indicator panes**
-- RSI: `createRsiChart`, `loadRsiData`, `calculateRSI`.
-- MACD: `createMacdChart`, `loadMacdData`, `calculateMACD` ~L1852+.
+- RSI: `createRsiChart`, `loadRsiData`, `calculateRSI` (whitespace at
+  index 0 — §4.2a). Follow mode: `rsiFollowChart`.
+- MACD: `createMacdChart`, `loadMacdData`, `calculateMACD`, `paintMacdHist`.
+  Follow mode: `macdFollowChart`. Layout: `applyMacdLayout` /
+  `resizeChartsForMacdLayout` / `setupMacdResize`.
 
 **Bars / future space**
 - `lastRealBarIndex(bars)` ~L1985 — scans backward for first non-zero
@@ -553,7 +578,7 @@ parser side); the fuller table exists for *emitting* readable names.
 
 ---
 
-## 9. Text protocol (build 82)
+## 9. Text protocol (unchanged since build 82)
 
 Commands (each also has an `RSI_`-prefixed twin except `MARKER`, which
 is main-chart only):

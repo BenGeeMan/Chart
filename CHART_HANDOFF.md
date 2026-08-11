@@ -38,6 +38,39 @@ not just this once** — treat it as standing practice, not a one-off.
 
 ## 0. NEXT SESSION PRIORITIES (read this first)
 
+**Session update (builds 82 → 94).** Large session. Completed and live:
+- **`CHART_TECHNICAL_REFERENCE.md` written** (was item 1) — the standalone
+  rebuild spec: data/localStorage schemas, the sync model, constant
+  tables, function map. Kept current through this whole session; it is now
+  the authoritative "how it works" doc. This item is DONE.
+- **Sync layer factored to be pane-agnostic** (was item 3) — `broadcastRange`
+  + `{chart(),bars(),getTF()}` pane descriptors + `syncPanes` registry.
+  Adding an indicator = one descriptor + one subscription. DONE (the
+  per-pane `loadX`/recompute functions are still hand-mirrored — see
+  Tech Ref §4.4).
+- **MACD added as a second indicator pane** at near-full parity with RSI:
+  own timeframe selector, Indicators-column on/off toggle, settings gear
+  (`macdSettings_v1`), pane position + resize (`macdLayout_v1`), sync,
+  future-space whitespace. Deferred for MACD: drawing tools,
+  gap-extension line, protocol twins.
+- **"Chart" follow-TF mode** for both indicators (now the default): the
+  indicator mirrors the main chart's timeframe. Tech Ref §4.5.
+- **Sync/alignment fully reworked** through a long bug chain — hard-lock to
+  main's data window (width-preserving clamp), value+recency echo
+  suppression, synchronous re-entrancy reset, equal price-scale widths,
+  RSI's 1-bar index-0 whitespace fix. **The sync internals below and in
+  Section 7 that predate this are superseded — trust Tech Ref §4 for the
+  current model.** The old pairwise `syncingFromMain`/`syncingFromRsi`
+  guards are gone; `sourceVisibleTime`/`paneRangeForWindow` are now dead
+  code.
+- Known data limit reconfirmed: **5m history is only ~9 trading days**
+  (still item 4 — extend it in the sibling pipeline).
+
+The pre-existing Section 0 / Section 7 text below is left as-is for
+history; where it conflicts with the above, the above (and Tech Ref) win.
+
+---
+
 **Framing for this update:** the previous session added features
 (future placeholder bars, RSI settings, per-tool defaults). This
 session was almost entirely the opposite — hardening the relationship

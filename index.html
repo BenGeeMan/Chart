@@ -964,7 +964,7 @@
       <div id="earnings-overlay"></div>
       <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">90</div>
+      <div id="build-number">91</div>
       <div id="main-no-data">No Data</div>
       <div id="rsi-settings-overlay"></div>
       <div id="macd-settings-overlay"></div>
@@ -1335,14 +1335,14 @@ function mainDataBounds() {
 // did not generalize past two panes.
 function broadcastRange(srcPane, range) {
   if (suppressSync || !range || syncInProgress) return;
-  if (isEcho(srcPane, range)) return;
-  syncInProgress = true;
 
   const srcTF = srcPane.getTF();
   let { from: fromT, to: toT } = sourceVisibleTime(srcPane.chart(), range, srcPane.bars(), srcTF);
 
   // HARD-LOCK: clamp the window to main's data extent (bounds expressed in
-  // srcTF for comparison against the source's own edge times).
+  // srcTF for comparison against the source's own edge times). Computed
+  // BEFORE the echo check below, because whether the source is out of
+  // bounds decides whether the echo check even applies.
   const mb = mainDataBounds();
   let clamped = false;
   if (mb && fromT != null && toT != null) {
@@ -1353,6 +1353,16 @@ function broadcastRange(srcPane, range) {
     // If both edges got pushed the window could invert; guard it.
     if (timeToNumeric(fromT) > timeToNumeric(toT)) { fromT = loSrc; toT = hiSrc; }
   }
+
+  // Echo suppression applies ONLY to in-bounds changes. If the source is
+  // out of bounds (clamped), it MUST spring back regardless of whether this
+  // event looks like an echo - an out-of-bounds view is never valid. This
+  // is the fix for "springs back most of the time but sometimes doesn't":
+  // an out-of-bounds scroll that happened to arrive within the echo
+  // recency window used to be dropped here, leaving the pane stuck out of
+  // bounds. In-bounds echoes are still suppressed so nothing bounces.
+  if (!clamped && isEcho(srcPane, range)) return;
+  syncInProgress = true;
 
   // If we clamped, snap the source pane itself back into the allowed window
   // (so the user can't scroll it past main's data - it springs back).

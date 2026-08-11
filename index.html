@@ -219,6 +219,28 @@
     pointer-events: none;
     overflow: visible;
   }
+  #macd-settings-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 7;
+    pointer-events: none;
+    overflow: visible;
+  }
+  #macd-settings-btn {
+    position: absolute;
+    top: 1px;
+    left: 325px;
+    z-index: 8;
+    background: #ffffff;
+    border: 1px solid var(--panel-border);
+    border-radius: 3px;
+    font-size: 11px;
+    color: var(--text-dim);
+    cursor: pointer;
+    padding: 2px 6px;
+    line-height: 1.4;
+  }
+  #macd-settings-btn:hover { color: var(--text); background: rgba(0,0,0,0.04); }
   #rsi-tf-buttons {
     position: absolute;
     top: 1px;
@@ -912,6 +934,7 @@
           <div class="ind-col">
             <div class="ind-col-title"><input type="checkbox" checked class="col-master">Indicators</div>
             <label class="ind-row" data-series="rsi"><input type="checkbox" checked><span class="swatch" style="background:#131722"></span>RSI (14)</label>
+            <label class="ind-row" data-series="macd"><input type="checkbox" checked><span class="swatch" style="background:#2962ff"></span>MACD (12,26,9)</label>
           </div>
         </div>
       </div>
@@ -929,9 +952,10 @@
       <div id="earnings-overlay"></div>
       <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">84</div>
+      <div id="build-number">85</div>
       <div id="main-no-data">No Data</div>
       <div id="rsi-settings-overlay"></div>
+      <div id="macd-settings-overlay"></div>
     </div>
     <div id="rsi-chart-container">
       <div id="rsi-resize-handle" title="Drag to resize"></div>
@@ -952,6 +976,7 @@
     </div>
     <div id="macd-chart-container">
       <div id="macd-label">MACD (12,26,9)</div>
+      <button id="macd-settings-btn" title="MACD settings">⚙</button>
       <div id="macd-tf-buttons">
         <button class="macd-tf-btn" data-tf="m5">5m</button>
         <button class="macd-tf-btn" data-tf="m15">15m</button>
@@ -1206,19 +1231,19 @@ function sourceVisibleTime(sourceChart, range, bars, tf) {
 // and position by logical index (setVisibleLogicalRange, never
 // setVisibleRange - the latter silently clamps a target time beyond the
 // destination's own loaded data; see timeToLogicalIndex's comment).
-function applyCrossPaneRange(src, dst, range) {
+// Pure: COMPUTES the logical range that dst should show to match src's
+// range, but does NOT apply it - the caller (broadcastRange) records the
+// result before setting it, so dst's own echoed range-change event can be
+// recognized and dropped. Returns null when there's nothing to apply.
+function computeCrossPaneRange(src, dst, range) {
   const srcTF = src.getTF(), dstTF = dst.getTF();
-  if (srcTF === dstTF) {
-    dst.chart().timeScale().setVisibleLogicalRange(range);
-    return;
-  }
+  if (srcTF === dstTF) return range;
   const { from: fromT, to: toT } = sourceVisibleTime(src.chart(), range, src.bars(), srcTF);
-  if (fromT != null && toT != null) {
-    dst.chart().timeScale().setVisibleLogicalRange({
-      from: timeToLogicalIndex(convertTimeBetweenTF(fromT, srcTF, dstTF), dst.bars()),
-      to: timeToLogicalIndex(convertTimeBetweenTF(toT, srcTF, dstTF), dst.bars()),
-    });
-  }
+  if (fromT == null || toT == null) return null;
+  return {
+    from: timeToLogicalIndex(convertTimeBetweenTF(fromT, srcTF, dstTF), dst.bars()),
+    to: timeToLogicalIndex(convertTimeBetweenTF(toT, srcTF, dstTF), dst.bars()),
+  };
 }
 
 // The pane descriptors the sync handlers pass to applyCrossPaneRange.
@@ -1235,26 +1260,45 @@ const syncPanes = [mainSyncPane, rsiSyncPane, macdSyncPane];
 
 // Broadcasts one pane's just-changed visible range to every OTHER pane
 // that currently exists (a pane whose chart() is null is toggled off and
-// skipped). This replaced the old pairwise main<->RSI model (two
-// per-direction boolean guards, syncingFromMain/syncingFromRsi), which
-// did not generalize: with three panes, a change originating in RSI would
-// reach main but main's own guard would then stop it propagating on to
-// MACD, leaving MACD silently out of sync. A single in-progress flag
-// covers any number of panes: when a change fires, we mark syncing,
-// push to all others, and the range-change events THOSE pushes trigger
-// are ignored (flag still up) so nothing bounces. The one-frame-deferred
-// reset is the SAME cascade fix the pairwise guards used - right after a
-// data swap the library emits a burst of intermediate range-change events
-// over several frames; resetting synchronously would let a late one slip
-// through unguarded (see CHART_HANDOFF.md Section 7 point 3). suppressSync
+// skipped). Replaced the old pairwise main<->RSI model (per-direction
+// booleans syncingFromMain/syncingFromRsi), which did not generalize: a
+// change from RSI would reach main but not propagate on to MACD.
+//
+// ECHO SUPPRESSION - the part that keeps three panes from drifting apart
+// under aggressive rapid wheel-zoom. When we set a range on a
+// destination pane, that pane emits its OWN range-change event. If that
+// echo were treated as a fresh user gesture it would re-broadcast a
+// re-converted range back to the others, and because cross-timeframe
+// conversion (e.g. daily<->weekly) is lossy, each round-trip accumulates
+// error - which is exactly what showed up as MACD/RSI/main slowly
+// sliding out of sync when a coarse-TF pane was zoomed hard. A single
+// syncInProgress flag reset one frame later is NOT enough: the library
+// fires those echoes over several LATER frames, past the reset. So we
+// also record, per pane, the exact range we last APPLIED to it
+// (lastAppliedRange), BEFORE calling setVisibleLogicalRange, and ignore
+// any incoming range that matches it - recognising an echo by VALUE
+// instead of by timing, which works no matter how many frames late it
+// fires. syncInProgress still guards the synchronous re-entry; suppressSync
 // still hard-mutes everything during a timeframe-switch transition.
 let syncInProgress = false;
+const lastAppliedRange = new WeakMap(); // pane descriptor -> {from,to} we last set on it
+function rangesClose(a, b) {
+  return !!a && !!b && Math.abs(a.from - b.from) < 0.05 && Math.abs(a.to - b.to) < 0.05;
+}
 function broadcastRange(srcPane, range) {
   if (suppressSync || !range || syncInProgress) return;
+  // srcPane echoing back a range WE just set on it (from another pane's
+  // broadcast) - not a real user gesture, so don't rebroadcast it.
+  if (rangesClose(range, lastAppliedRange.get(srcPane))) return;
   syncInProgress = true;
   for (const dst of syncPanes) {
     if (dst === srcPane || !dst.chart()) continue;
-    applyCrossPaneRange(srcPane, dst, range);
+    const target = computeCrossPaneRange(srcPane, dst, range);
+    if (!target) continue;
+    // Record BEFORE setting, so dst's synchronous echo (if any) already
+    // sees it recorded and is dropped by the check above.
+    lastAppliedRange.set(dst, target);
+    dst.chart().timeScale().setVisibleLogicalRange(target);
   }
   requestAnimationFrame(() => { syncInProgress = false; });
 }
@@ -1270,18 +1314,22 @@ function broadcastRange(srcPane, range) {
 function reassertIndicatorRange(pane, targetFrom, targetTo, mainData, mainTF) {
   if (!pane.chart()) return;
   const paneTF = pane.getTF();
+  let applied;
   if (paneTF === mainTF) {
-    pane.chart().timeScale().setVisibleLogicalRange({ from: targetFrom, to: targetTo });
-    return;
-  }
-  const fromT = logicalIndexToTFTime(targetFrom, mainData, mainTF);
-  const toT = logicalIndexToTFTime(targetTo, mainData, mainTF);
-  if (fromT != null && toT != null) {
-    pane.chart().timeScale().setVisibleLogicalRange({
+    applied = { from: targetFrom, to: targetTo };
+  } else {
+    const fromT = logicalIndexToTFTime(targetFrom, mainData, mainTF);
+    const toT = logicalIndexToTFTime(targetTo, mainData, mainTF);
+    if (fromT == null || toT == null) return;
+    applied = {
       from: timeToLogicalIndex(convertTimeBetweenTF(fromT, mainTF, paneTF), pane.bars()),
       to: timeToLogicalIndex(convertTimeBetweenTF(toT, mainTF, paneTF), pane.bars()),
-    });
+    };
   }
+  // Record it too, so once suppressSync lifts, this pane's echoed
+  // range-change event is recognised as ours and not rebroadcast.
+  lastAppliedRange.set(pane, applied);
+  pane.chart().timeScale().setVisibleLogicalRange(applied);
 }
 
 // Builds a short, flat "last value carried forward" segment bridging
@@ -1533,6 +1581,7 @@ let macdSignalSeries = null;  // signal line (EMA of the MACD line)
 let macdHistSeries = null;    // histogram (MACD - signal)
 let macdBarsData = [];
 let macdTF = 'daily';         // MACD's own timeframe, independent of the main chart's
+let macdEnabled = true;       // on/off via the Indicators column, mirrors rsiEnabled
 const macdChartEl = document.getElementById('macd-chart');
 
 // --- RSI's own settings: the RSI line's color/thickness/line-type, and
@@ -1906,11 +1955,64 @@ function calculateMACD(bars, fast = 12, slow = 26, signalPeriod = 9) {
     prev = prev === null ? m.value : m.value * k + prev * (1 - k);
     return { time: m.time, value: prev };
   });
-  const hist = macd.map((m, i) => {
-    const v = m.value - signal[i].value;
-    return { time: m.time, value: v, color: v >= 0 ? 'rgba(38,166,154,0.5)' : 'rgba(239,83,80,0.5)' };
-  });
+  // Histogram carries no color here - color is applied at paint time
+  // (paintMacdHist) from macdSettings, so a live color change in the
+  // settings panel can re-tint the existing bars without recomputing.
+  const hist = macd.map((m, i) => ({ time: m.time, value: m.value - signal[i].value }));
   return { macd, signal, hist };
+}
+
+// --- MACD's own settings: the MACD line, the signal line (each with
+// color/thickness/line-type), and the histogram's up/down bar colors.
+// Mirrors the RSI settings machinery (rsiSettings_v1) but for MACD.
+// Persisted separately under macdSettings_v1. ---
+const MACD_SETTINGS_STORAGE_KEY = 'macdSettings_v1';
+const MACD_SETTINGS_FACTORY_DEFAULT = {
+  macd:   { color: '#2962ff', lineWidth: 2, lineStyle: 'solid' },
+  signal: { color: '#ff6d00', lineWidth: 1, lineStyle: 'solid' },
+  hist:   { upColor: '#26a69a', downColor: '#ef5350' },
+};
+function loadMacdSettings() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(MACD_SETTINGS_STORAGE_KEY) || 'null');
+    return {
+      macd:   Object.assign({}, MACD_SETTINGS_FACTORY_DEFAULT.macd,   saved && saved.macd),
+      signal: Object.assign({}, MACD_SETTINGS_FACTORY_DEFAULT.signal, saved && saved.signal),
+      hist:   Object.assign({}, MACD_SETTINGS_FACTORY_DEFAULT.hist,   saved && saved.hist),
+    };
+  } catch (e) {
+    return JSON.parse(JSON.stringify(MACD_SETTINGS_FACTORY_DEFAULT));
+  }
+}
+let macdSettings = loadMacdSettings();
+function persistMacdSettings() {
+  try { localStorage.setItem(MACD_SETTINGS_STORAGE_KEY, JSON.stringify(macdSettings)); } catch (e) {}
+}
+
+// The last computed histogram values (no color) - kept so a settings
+// change can re-tint the bars without refetching/recomputing.
+let macdHistRaw = [];
+function paintMacdHist(hist) {
+  macdHistRaw = hist;
+  if (!macdHistSeries) return;
+  macdHistSeries.setData(hist.map(h => ({
+    time: h.time, value: h.value,
+    color: h.value >= 0 ? macdSettings.hist.upColor : macdSettings.hist.downColor,
+  })));
+}
+
+// (Re)applies macdSettings to the live series - line color/width/style
+// via applyOptions, histogram via a re-tint of the stored raw values.
+function applyMacdSettings() {
+  if (macdLineSeries) macdLineSeries.applyOptions({
+    color: macdSettings.macd.color, lineWidth: macdSettings.macd.lineWidth,
+    lineStyle: LINE_STYLE_MAP[macdSettings.macd.lineStyle],
+  });
+  if (macdSignalSeries) macdSignalSeries.applyOptions({
+    color: macdSettings.signal.color, lineWidth: macdSettings.signal.lineWidth,
+    lineStyle: LINE_STYLE_MAP[macdSettings.signal.lineStyle],
+  });
+  if (macdHistSeries) paintMacdHist(macdHistRaw);
 }
 
 function createMacdChart() {
@@ -1942,6 +2044,7 @@ function createMacdChart() {
   // broadcastRange). This runs inside createMacdChart so it re-subscribes
   // if the chart is ever torn down and recreated, same as RSI.
   macdChart.timeScale().subscribeVisibleLogicalRangeChange(range => broadcastRange(macdSyncPane, range));
+  applyMacdSettings();  // apply any saved line styles to the fresh series
   loadMacdData(macdTF);
 }
 
@@ -1972,7 +2075,7 @@ function loadMacdData(tf) {
       const future = data.slice(realIdx + 1).map(d => ({ time: d.time }));
       macdLineSeries.setData(macd.concat(future));
       macdSignalSeries.setData(signal.concat(future));
-      macdHistSeries.setData(hist);
+      paintMacdHist(hist);
       // Initial view = the main chart's current calendar window converted
       // into MACD's own timeframe - identical approach to loadRsiData
       // (logicalIndexToTFTime, not getVisibleRange, so it's correct even
@@ -2453,7 +2556,7 @@ function loadTimeframe(tf) {
         const future = data.slice(realIdx + 1).map(d => ({ time: d.time }));
         macdLineSeries.setData(macd.concat(future));
         macdSignalSeries.setData(signal.concat(future));
-        macdHistSeries.setData(hist);
+        paintMacdHist(hist);
         macdBarsData = data;
       }
 
@@ -2651,6 +2754,8 @@ document.querySelectorAll('#legend .ind-row[data-series]').forEach(row => {
       renderEarningsOverlay();
     } else if (key === 'rsi') {
       setRsiEnabled(checkbox.checked);
+    } else if (key === 'macd') {
+      setMacdEnabled(checkbox.checked);
     } else {
       toggleableSeries[key].applyOptions({ visible: checkbox.checked });
     }
@@ -2937,6 +3042,118 @@ document.addEventListener('click', () => {
   if (rsiSettingsPanelOpen) { rsiSettingsPanelOpen = false; renderRsiSettingsPanel(); }
 });
 
+// --- MACD settings panel - the same draggable, center-of-main-area
+// panel pattern as the RSI one, with three sections: MACD Line, Signal
+// Line (each color/thickness/line-type) and Histogram (up/down colors).
+// Set as Default / Restore Default persist to macdSettings_v1. ---
+let macdSettingsPanelOpen = false;
+function renderMacdSettingsPanel() {
+  const container = document.getElementById('macd-settings-overlay');
+  if (!container) return;
+  container.innerHTML = '';
+  if (!macdSettingsPanelOpen) return;
+
+  const panel = document.createElement('div');
+  panel.className = 'drawing-settings-panel rsi-settings-panel';
+  panel.style.top = '50%';
+  panel.style.left = '50%';
+  panel.style.transform = 'translate(-50%, -50%)';
+  panel.addEventListener('mousedown', (e) => e.stopPropagation());
+  panel.addEventListener('click', (e) => e.stopPropagation());
+
+  const dragHandle = document.createElement('div');
+  dragHandle.className = 'panel-drag-handle';
+  dragHandle.textContent = 'MACD Settings';
+  panel.appendChild(dragHandle);
+  makeDraggable(panel, dragHandle);
+
+  function addRow(labelText, inputEl) {
+    const row = document.createElement('div');
+    row.className = 'row';
+    const label = document.createElement('label');
+    label.textContent = labelText;
+    row.appendChild(label);
+    row.appendChild(inputEl);
+    panel.appendChild(row);
+  }
+  function addSectionHeader(text) {
+    const h = document.createElement('div');
+    h.className = 'rsi-settings-section';
+    h.textContent = text;
+    panel.appendChild(h);
+  }
+  function colorRow(labelText, obj, key) {
+    const input = document.createElement('input');
+    input.type = 'color';
+    input.value = obj[key];
+    input.addEventListener('input', () => { obj[key] = input.value; applyMacdSettings(); });
+    addRow(labelText, input);
+  }
+  // color/thickness/line-type, same control set as RSI's makeStyleRows.
+  function styleRows(styleObj) {
+    colorRow('Color', styleObj, 'color');
+    const widthSelect = document.createElement('select');
+    [1, 2, 3, 4].forEach((v) => {
+      const opt = document.createElement('option');
+      opt.value = String(v); opt.textContent = v + 'px';
+      if (v === styleObj.lineWidth) opt.selected = true;
+      widthSelect.appendChild(opt);
+    });
+    widthSelect.addEventListener('change', () => { styleObj.lineWidth = parseInt(widthSelect.value, 10); applyMacdSettings(); });
+    addRow('Thickness', widthSelect);
+    const styleSelect = document.createElement('select');
+    [['solid', 'Solid'], ['dashed', 'Dashed'], ['tightDotted', 'Dotted (tight)'], ['dotted', 'Dotted (wide)']].forEach(([v, label]) => {
+      const opt = document.createElement('option');
+      opt.value = v; opt.textContent = label;
+      if (v === styleObj.lineStyle) opt.selected = true;
+      styleSelect.appendChild(opt);
+    });
+    styleSelect.addEventListener('change', () => { styleObj.lineStyle = styleSelect.value; applyMacdSettings(); });
+    addRow('Line', styleSelect);
+  }
+
+  addSectionHeader('MACD Line');
+  styleRows(macdSettings.macd);
+  addSectionHeader('Signal Line');
+  styleRows(macdSettings.signal);
+  addSectionHeader('Histogram');
+  colorRow('Up', macdSettings.hist, 'upColor');
+  colorRow('Down', macdSettings.hist, 'downColor');
+
+  const actionsRow = document.createElement('div');
+  actionsRow.className = 'panel-actions-row';
+  const setDefaultBtn = document.createElement('button');
+  setDefaultBtn.textContent = 'Set as Default';
+  setDefaultBtn.addEventListener('mousedown', (e) => e.stopPropagation());
+  setDefaultBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    persistMacdSettings();
+    setStatus('Saved as the default MACD settings.', false);
+  });
+  actionsRow.appendChild(setDefaultBtn);
+  const restoreDefaultBtn = document.createElement('button');
+  restoreDefaultBtn.textContent = 'Restore Default';
+  restoreDefaultBtn.addEventListener('mousedown', (e) => e.stopPropagation());
+  restoreDefaultBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    macdSettings = loadMacdSettings();
+    applyMacdSettings();
+    renderMacdSettingsPanel();
+  });
+  actionsRow.appendChild(restoreDefaultBtn);
+  panel.appendChild(actionsRow);
+
+  container.appendChild(panel);
+}
+document.getElementById('macd-settings-btn').addEventListener('click', (e) => {
+  e.stopPropagation();
+  macdSettingsPanelOpen = !macdSettingsPanelOpen;
+  renderMacdSettingsPanel();
+});
+document.addEventListener('click', () => {
+  if (macdSettingsPanelOpen) { macdSettingsPanelOpen = false; renderMacdSettingsPanel(); }
+});
+
 function setRsiEnabled(enabled) {
   rsiEnabled = enabled;
   document.getElementById('rsi-chart-container').classList.toggle('hidden', !enabled);
@@ -2960,6 +3177,27 @@ function setRsiEnabled(enabled) {
     rsiChart = null;
     rsiSeries = null;
     rsiExtensionSeries = null;
+  }
+}
+
+// MACD's on/off, mirroring setRsiEnabled but simpler - MACD has no
+// drawing-pane controller to attach/reset (deferred parity item), so
+// this only creates/destroys the chart instance and toggles the
+// container. broadcastRange already skips a pane whose chart() is null,
+// so turning MACD off cleanly drops it out of the sync with no other
+// bookkeeping.
+function setMacdEnabled(enabled) {
+  macdEnabled = enabled;
+  document.getElementById('macd-chart-container').classList.toggle('hidden', !enabled);
+  chart.applyOptions({ width: chartEl.clientWidth, height: chartEl.clientHeight });
+  if (enabled) {
+    requestAnimationFrame(() => { createMacdChart(); });
+  } else if (macdChart) {
+    macdChart.remove();
+    macdChart = null;
+    macdLineSeries = null;
+    macdSignalSeries = null;
+    macdHistSeries = null;
   }
 }
 
@@ -4476,7 +4714,7 @@ function updateOutputBox() {
       // directly from the chart/image itself (each either appears or
       // doesn't) - no need to also spell that out in text. Volume EMA 20
       // stays listed since it's a specific colored line worth naming.
-      .filter(row => !['rsi', 'earnings', 'turnover'].includes(row.dataset.series))
+      .filter(row => !['rsi', 'macd', 'earnings', 'turnover'].includes(row.dataset.series))
       .map(row => {
         const cb = row.querySelector('input[type="checkbox"]');
         const label = row.textContent.trim();

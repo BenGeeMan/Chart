@@ -195,6 +195,23 @@ const FACTORY_STYLE_DEFAULT_HLINE = { color: 'blue', colorHex: '#2962ff', opacit
 Shared between the main chart and RSI panes (it's about the tool, not
 the pane).
 
+### 3.4 `macdSettings_v1` — MACD indicator styling
+
+Const `MACD_SETTINGS_STORAGE_KEY`. Factory default
+`MACD_SETTINGS_FACTORY_DEFAULT`:
+```js
+{
+  macd:   { color: '#2962ff', lineWidth: 2, lineStyle: 'solid' },
+  signal: { color: '#ff6d00', lineWidth: 1, lineStyle: 'solid' },
+  hist:   { upColor: '#26a69a', downColor: '#ef5350' },
+}
+```
+Same per-section deep-merge load (`loadMacdSettings`) as `rsiSettings_v1`
+(§3.1). `macd`/`signal` are line styles (`lineStyle` = `LINE_STYLE_MAP`
+key, §8.2); `hist` is the histogram's up/down bar colors, applied at
+paint time so a live change re-tints without recompute. Set/Restore
+Default via the MACD settings gear.
+
 ---
 
 ## 4. The cross-pane sync model (main ↔ indicator panes)
@@ -215,13 +232,24 @@ descriptor per pane. Three functions carry the model:
 - `applyCrossPaneRange(src, dst, range)` (~L1123) — maps one pane's
   visible range onto another (same-TF passthrough vs. cross-TF
   calendar conversion). The pane-agnostic core.
-- `broadcastRange(srcPane, range)` (~L1245) — each pane's timeScale
-  subscription calls this; it pushes the range to every *other* live pane
-  via `applyCrossPaneRange`. One `syncInProgress` flag (reset one frame
-  later) guards the whole burst — replacing the old pairwise
-  `syncingFromMain`/`syncingFromRsi` booleans, which did **not**
-  generalize (a change from RSI would reach main but not propagate on to
-  MACD). `suppressSync` still hard-mutes during TF-switch transitions.
+- `computeCrossPaneRange(src, dst, range)` — **pure**; returns the range
+  dst should show, does not set it (so the caller can record it first).
+- `broadcastRange(srcPane, range)` (~L1277) — each pane's timeScale
+  subscription calls this; it pushes the range to every *other* live pane.
+  Two guards: (1) `syncInProgress` (reset one frame later) blocks
+  synchronous re-entry; (2) **echo suppression by value** —
+  `lastAppliedRange` (a WeakMap pane→range) records what we set on each
+  pane *before* setting it, and any incoming range matching it
+  (`rangesClose`, tol 0.05 bar) is ignored. This is what stops three
+  panes drifting apart under aggressive rapid wheel-zoom: the library
+  fires a destination's echo several frames *late*, past the
+  `syncInProgress` reset, and each late echo would otherwise re-broadcast
+  a re-converted range — cross-TF conversion is lossy, so the round-trips
+  accumulate error. Recognising the echo by value catches it regardless
+  of timing. Replaced the old pairwise `syncingFromMain`/`syncingFromRsi`
+  booleans, which did **not** generalize (a change from RSI reached main
+  but not MACD). `suppressSync` still hard-mutes during TF-switch
+  transitions.
 - `reassertIndicatorRange(pane, from, to, mainData, mainTF)` (~L1262) —
   the settle-then-reassert step in `loadTimeframe`, one call per indicator
   pane instead of a copy-pasted block.
@@ -296,16 +324,24 @@ points, mirroring RSI exactly:
   `reassertIndicatorRange(macdSyncPane, …)` call.
 - **switchTicker:** `if (macdChart) loadMacdData(currentTF)`.
 
-**Reused cleanly** (the payoff): `applyCrossPaneRange`/`broadcastRange`/
+**Reused cleanly** (the payoff): `computeCrossPaneRange`/`broadcastRange`/
 `reassertIndicatorRange` (sync), `calculateEMA` (math),
 `lastRealBarIndex` + whitespace pattern (future), and the time/index
 converters. **Hand-mirrored, not shared** (the remaining parity debt):
 `loadMacdData` ≈ `loadRsiData`, and the `loadTimeframe` recompute block —
 these two would benefit from an `IndicatorPane` factory next, the way
-`createDrawingPane` already unifies the drawing tools. **Deferred for
-MACD** (RSI has them, MACD doesn't yet): settings panel, drawing tools,
-gap-extension line, on/off toggle + legend row, resize/reposition/persist
-layout, protocol twins (`MACD_*`), Chart-State output, screenshot capture.
+`createDrawingPane` already unifies the drawing tools.
+
+**MACD now at parity with RSI on:** Indicators-column row + on/off toggle
+(`setMacdEnabled`, `data-series="macd"`; excluded from Chart-State text
+like RSI since it's visibly on/off), settings gear + panel
+(`renderMacdSettingsPanel`: MACD Line / Signal Line / Histogram sections,
+persisted to `macdSettings_v1` — §3.4), whitespace future padding, sync.
+Histogram bar colors are applied at paint time (`paintMacdHist` +
+`macdHistRaw`) so a live settings change re-tints without recompute.
+**Still deferred for MACD** (RSI has them): drawing tools, gap-extension
+line, resize/reposition/persist layout (fixed 140px, bottom), protocol
+twins (`MACD_*`), Chart-State style lines, screenshot capture.
 
 ## 5. Future-space rendering policy
 

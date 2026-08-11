@@ -964,7 +964,7 @@
       <div id="earnings-overlay"></div>
       <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">89</div>
+      <div id="build-number">90</div>
       <div id="main-no-data">No Data</div>
       <div id="rsi-settings-overlay"></div>
       <div id="macd-settings-overlay"></div>
@@ -1373,7 +1373,17 @@ function broadcastRange(srcPane, range) {
     recordApplied(dst, target); // record BEFORE setting, so a sync echo is caught
     dst.chart().timeScale().setVisibleLogicalRange(target);
   }
-  requestAnimationFrame(() => { syncInProgress = false; });
+  // Reset SYNCHRONOUSLY. syncInProgress only needs to block the re-entrant
+  // broadcasts that firing setVisibleLogicalRange above triggers within
+  // this same call stack; any echo that arrives on a LATER frame is caught
+  // by isEcho() (value + recency) instead. The old requestAnimationFrame-
+  // deferred reset was from before those echo guards existed - and under a
+  // rapid wheel-zoom burst the rAF could be starved/throttled so the reset
+  // never fired, leaving syncInProgress stuck true and every later
+  // broadcast blocked -> the indicator panes froze while the main chart
+  // kept zooming (the "zoom in until candles are less than chart width, it
+  // fights then fails" bug). A synchronous reset can't get stuck.
+  syncInProgress = false;
 }
 
 // Forces one indicator pane to the main chart's target logical range,

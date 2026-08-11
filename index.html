@@ -234,6 +234,22 @@
     cursor: pointer;
     background: none;
   }
+  .turnover-style {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 8px;
+    align-items: center;
+    padding: 2px 0 4px 22px;
+    font-size: 10px;
+    color: var(--text-dim);
+  }
+  .turnover-style label { display: inline-flex; align-items: center; gap: 3px; }
+  .turnover-style input[type=color] {
+    width: 20px; height: 15px; padding: 0;
+    border: 1px solid var(--panel-border); border-radius: 3px; cursor: pointer; background: none;
+  }
+  .turnover-style input[type=range] { width: 54px; }
+  .turnover-transp { flex-basis: 100%; }
   #rsi-drawing-overlay, #macd-drawing-overlay {
     position: absolute;
     inset: 0;
@@ -1018,6 +1034,12 @@
             <div class="ind-col-title"><input type="checkbox" checked class="col-master">Indicators</div>
             <label class="ind-row" data-series="rsi"><input type="checkbox" checked><span class="swatch" style="background:#131722"></span>RSI (14)</label>
             <label class="ind-row" data-series="macd"><input type="checkbox" checked><span class="swatch" style="background:#2962ff"></span>MACD (12,26,9)</label>
+            <label class="ind-row" data-series="turnoverbox"><input type="checkbox" checked>Turnover</label>
+            <div class="turnover-style">
+              <label title="Background colour">Bg<input type="color" id="turnover-bg-color"></label>
+              <label title="Text colour">Txt<input type="color" id="turnover-text-color"></label>
+              <label title="Background transparency" class="turnover-transp">α<input type="range" id="turnover-bg-opacity" min="0" max="100"></label>
+            </div>
           </div>
         </div>
       </div>
@@ -1035,7 +1057,7 @@
       <div id="earnings-overlay"></div>
       <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">100</div>
+      <div id="build-number">101</div>
       <div id="main-no-data">No Data</div>
       <div id="rsi-settings-overlay"></div>
       <div id="macd-settings-overlay"></div>
@@ -2793,6 +2815,31 @@ function paintVolume() {
   turnoverSeries.setData(barsData.map(d => ({ time: d.time, value: d.volume, color: volumeBarColor(d) })));
 }
 
+// The on-chart turnover info boxes (LT / AT(3) / AT(20), current + daily):
+// user-adjustable show/hide, background colour, background transparency and
+// text colour. Persisted to turnoverStyle_v1.
+const TURNOVER_STYLE_KEY = 'turnoverStyle_v1';
+const TURNOVER_STYLE_DEFAULT = { visible: true, bgColor: '#ffffff', bgOpacity: 1, textColor: '#787b86' };
+function loadTurnoverStyle() {
+  try { return Object.assign({}, TURNOVER_STYLE_DEFAULT, JSON.parse(localStorage.getItem(TURNOVER_STYLE_KEY) || 'null')); }
+  catch (e) { return Object.assign({}, TURNOVER_STYLE_DEFAULT); }
+}
+let turnoverStyle = loadTurnoverStyle();
+function persistTurnoverStyle() { try { localStorage.setItem(TURNOVER_STYLE_KEY, JSON.stringify(turnoverStyle)); } catch (e) {} }
+function applyTurnoverStyle() {
+  const bg = hexToRgba(turnoverStyle.bgColor, turnoverStyle.bgOpacity);
+  ['turnover-box', 'turnover-box-daily'].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.style.background = bg;
+    el.style.color = turnoverStyle.textColor;
+    el.style.display = turnoverStyle.visible ? '' : 'none';
+    // .value/.label spans carry their own colour in CSS - override so the
+    // whole box follows the chosen text colour.
+    el.querySelectorAll('.value, .label, .ind-title').forEach(s => { s.style.color = turnoverStyle.textColor; });
+  });
+}
+
 function loadTimeframe(tf) {
   const cfg = TIMEFRAME_META[tf];
   const file = `${currentTicker.toLowerCase()}_${tf}.json`;
@@ -3092,6 +3139,10 @@ document.querySelectorAll('#legend .ind-row[data-series]').forEach(row => {
       setRsiEnabled(checkbox.checked);
     } else if (key === 'macd') {
       setMacdEnabled(checkbox.checked);
+    } else if (key === 'turnoverbox') {
+      turnoverStyle.visible = checkbox.checked;
+      applyTurnoverStyle();
+      persistTurnoverStyle();
     } else {
       toggleableSeries[key].applyOptions({ visible: checkbox.checked });
     }
@@ -3110,6 +3161,25 @@ document.querySelectorAll('#legend .ind-row[data-series]').forEach(row => {
   down.value = volumeColors.down;
   up.addEventListener('input', () => { volumeColors.up = up.value; paintVolume(); persistVolumeColors(); });
   down.addEventListener('input', () => { volumeColors.down = down.value; paintVolume(); persistVolumeColors(); });
+})();
+
+// Turnover box style controls (Indicators panel): background colour, text
+// colour, background transparency. Live-apply + persist. Also reflect the
+// saved show/hide state onto the box + its checkbox at startup.
+(function setupTurnoverStyleControls() {
+  const bg = document.getElementById('turnover-bg-color');
+  const txt = document.getElementById('turnover-text-color');
+  const op = document.getElementById('turnover-bg-opacity');
+  if (!bg || !txt || !op) return;
+  bg.value = turnoverStyle.bgColor;
+  txt.value = turnoverStyle.textColor;
+  op.value = Math.round(turnoverStyle.bgOpacity * 100);
+  bg.addEventListener('input', () => { turnoverStyle.bgColor = bg.value; applyTurnoverStyle(); persistTurnoverStyle(); });
+  txt.addEventListener('input', () => { turnoverStyle.textColor = txt.value; applyTurnoverStyle(); persistTurnoverStyle(); });
+  op.addEventListener('input', () => { turnoverStyle.bgOpacity = parseInt(op.value, 10) / 100; applyTurnoverStyle(); persistTurnoverStyle(); });
+  const cb = document.querySelector('.ind-row[data-series="turnoverbox"] input');
+  if (cb) cb.checked = turnoverStyle.visible;
+  applyTurnoverStyle();
 })();
 
 // Multi-timeframe EMA 10 overlays - each one fetches its own timeframe's
@@ -3436,7 +3506,7 @@ function renderMacdSettingsPanel() {
   if (!macdSettingsPanelOpen) return;
 
   const panel = document.createElement('div');
-  panel.className = 'drawing-settings-panel rsi-settings-panel';
+  panel.className = 'drawing-settings-panel rsi-settings-panel settings-2col';
   panel.style.top = '50%';
   panel.style.left = '50%';
   panel.style.transform = 'translate(-50%, -50%)';
@@ -3449,6 +3519,12 @@ function renderMacdSettingsPanel() {
   panel.appendChild(dragHandle);
   makeDraggable(panel, dragHandle);
 
+  // 2-column body, same as the RSI settings panel (§ .settings-2col CSS).
+  const body = document.createElement('div');
+  body.className = 'settings-body';
+  panel.appendChild(body);
+  let currentSection = null;
+
   function addRow(labelText, inputEl) {
     const row = document.createElement('div');
     row.className = 'row';
@@ -3456,13 +3532,16 @@ function renderMacdSettingsPanel() {
     label.textContent = labelText;
     row.appendChild(label);
     row.appendChild(inputEl);
-    panel.appendChild(row);
+    (currentSection || body).appendChild(row);
   }
   function addSectionHeader(text) {
+    currentSection = document.createElement('div');
+    currentSection.className = 'settings-section-group';
     const h = document.createElement('div');
     h.className = 'rsi-settings-section';
     h.textContent = text;
-    panel.appendChild(h);
+    currentSection.appendChild(h);
+    body.appendChild(currentSection);
   }
   function colorRow(labelText, obj, key) {
     const input = document.createElement('input');

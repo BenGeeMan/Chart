@@ -219,6 +219,21 @@
     white-space: nowrap;
   }
   #chart-context-menu .ctx-item:hover { background: rgba(41,98,255,0.1); color: var(--accent); }
+  .vol-colors {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+    padding: 2px 0 2px 22px;
+  }
+  .vol-colors input[type=color] {
+    width: 22px;
+    height: 16px;
+    padding: 0;
+    border: 1px solid var(--panel-border);
+    border-radius: 3px;
+    cursor: pointer;
+    background: none;
+  }
   #rsi-drawing-overlay, #macd-drawing-overlay {
     position: absolute;
     inset: 0;
@@ -975,6 +990,10 @@
           <div class="ind-col">
             <div class="ind-col-title"><input type="checkbox" checked class="col-master">Volume</div>
             <label class="ind-row" data-series="turnover"><input type="checkbox" checked>Volume</label>
+            <div class="vol-colors" title="Volume bar colours">
+              <input type="color" id="vol-up-color" title="Up bar colour">
+              <input type="color" id="vol-down-color" title="Down bar colour">
+            </div>
             <label class="ind-row" data-series="turnover_ema"><input type="checkbox" checked><span class="swatch dashed" style="border-color:#5b8ff9"></span>Volume EMA 20</label>
           </div>
           <div class="ind-col">
@@ -1003,7 +1022,7 @@
       <div id="earnings-overlay"></div>
       <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">98</div>
+      <div id="build-number">99</div>
       <div id="main-no-data">No Data</div>
       <div id="rsi-settings-overlay"></div>
       <div id="macd-settings-overlay"></div>
@@ -2737,6 +2756,30 @@ function candleWindowAround(anchorIdx) {
   return { from: anchorIdx - CANDLES_EACH_SIDE, to: anchorIdx + CANDLES_EACH_SIDE };
 }
 
+// User-adjustable volume histogram up/down bar colors (Indicators panel),
+// drawn at 45% opacity. Persisted; defaults match the chart's green/red.
+const VOLUME_COLORS_KEY = 'volumeColors_v1';
+const VOLUME_COLORS_DEFAULT = { up: '#26a69a', down: '#ef5350' };
+function loadVolumeColors() {
+  try { return Object.assign({}, VOLUME_COLORS_DEFAULT, JSON.parse(localStorage.getItem(VOLUME_COLORS_KEY) || 'null')); }
+  catch (e) { return Object.assign({}, VOLUME_COLORS_DEFAULT); }
+}
+let volumeColors = loadVolumeColors();
+function persistVolumeColors() { try { localStorage.setItem(VOLUME_COLORS_KEY, JSON.stringify(volumeColors)); } catch (e) {} }
+function hexToRgba(hex, a) {
+  const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex);
+  return m ? `rgba(${parseInt(m[1],16)}, ${parseInt(m[2],16)}, ${parseInt(m[3],16)}, ${a})` : hex;
+}
+function volumeBarColor(bar) {
+  return bar.close >= bar.open ? hexToRgba(volumeColors.up, 0.45) : hexToRgba(volumeColors.down, 0.45);
+}
+// Re-colors the volume histogram from the current barsData without a reload
+// (so a color change applies live), same pattern as paintMacdHist.
+function paintVolume() {
+  if (!barsData.length) return;
+  turnoverSeries.setData(barsData.map(d => ({ time: d.time, value: d.volume, color: volumeBarColor(d) })));
+}
+
 function loadTimeframe(tf) {
   const cfg = TIMEFRAME_META[tf];
   const file = `${currentTicker.toLowerCase()}_${tf}.json`;
@@ -2799,11 +2842,7 @@ function loadTimeframe(tf) {
         emaSeries[key].setData(realData.filter(d => d[key] != null).map(d => ({ time: d.time, value: d[key] })));
       }
       emaSeries.ema_200.setData(calculateEMA(realData, 200));
-      turnoverSeries.setData(data.map(d => ({
-        time: d.time,
-        value: d.volume,
-        color: d.close >= d.open ? 'rgba(38,166,154,0.45)' : 'rgba(239,83,80,0.45)',
-      })));
+      turnoverSeries.setData(data.map(d => ({ time: d.time, value: d.volume, color: volumeBarColor(d) })));
       currentVolumeEma3 = calculateEMA(realData, 3, 'volume');
       currentVolumeEma20 = calculateEMA(realData, 20, 'volume');
       turnoverEmaSeries.setData(currentVolumeEma20);
@@ -3047,6 +3086,18 @@ document.querySelectorAll('#legend .ind-row[data-series]').forEach(row => {
     updateOutputBox();
   });
 });
+
+// Volume up/down bar colour pickers (Indicators panel). Live re-tint via
+// paintVolume(), persisted to volumeColors_v1.
+(function setupVolumeColorPickers() {
+  const up = document.getElementById('vol-up-color');
+  const down = document.getElementById('vol-down-color');
+  if (!up || !down) return;
+  up.value = volumeColors.up;
+  down.value = volumeColors.down;
+  up.addEventListener('input', () => { volumeColors.up = up.value; paintVolume(); persistVolumeColors(); });
+  down.addEventListener('input', () => { volumeColors.down = down.value; paintVolume(); persistVolumeColors(); });
+})();
 
 // Multi-timeframe EMA 10 overlays - each one fetches its own timeframe's
 // data on demand rather than just toggling visibility on an already-set

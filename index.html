@@ -884,7 +884,7 @@
       <div id="earnings-overlay"></div>
       <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">81</div>
+      <div id="build-number">82</div>
       <div id="main-no-data">No Data</div>
       <div id="rsi-settings-overlay"></div>
     </div>
@@ -936,8 +936,14 @@ const LINE_STYLE_MAP = {
   // Regular "Dotted" renders as tiny, tightly-packed dots that read as
   // near-identical to Dashed at a glance. SparseDotted uses the same
   // dot shape with much wider gaps, which is what actually reads as
-  // visually distinct from a dashed line.
+  // visually distinct from a dashed line. Kept as the 'dotted' key
+  // (existing saved settings/drawings already use this string to mean
+  // SparseDotted - don't repoint it) and added 'tightDotted' as a
+  // separate, additional choice for anything that wants the closer-
+  // together dots instead - lets a "Line" style dropdown offer both
+  // spacings distinctly rather than only ever meaning SparseDotted.
   dotted: LightweightCharts.LineStyle.SparseDotted,
+  tightDotted: LightweightCharts.LineStyle.Dotted,
 };
 
 const chart = LightweightCharts.createChart(chartEl, {
@@ -1369,6 +1375,12 @@ const RSI_SETTINGS_FACTORY_DEFAULT = {
   upper: { enabled: true, value: 60, color: '#9a9ea6', lineWidth: 2, lineStyle: 'dashed' },
   middle: { enabled: false, value: 50, color: '#9a9ea6', lineWidth: 2, lineStyle: 'dashed' },
   lower: { enabled: true, value: 40, color: '#9a9ea6', lineWidth: 2, lineStyle: 'dashed' },
+  // The gap-bridging line (see buildLastValueExtension/rsiExtensionSeries)
+  // that carries RSI's last real value forward to today when RSI's own
+  // timeframe is coarser than the main chart's. An independent color
+  // (not derived from the real line's own color) so it can be tuned
+  // freely, e.g. straight to a light gray rather than a faded black.
+  extension: { color: '#9a9ea6', lineWidth: 4, lineStyle: 'tightDotted' },
 };
 
 function loadRsiSettings() {
@@ -1383,6 +1395,7 @@ function loadRsiSettings() {
       upper: Object.assign({}, RSI_SETTINGS_FACTORY_DEFAULT.upper, saved && saved.upper),
       middle: Object.assign({}, RSI_SETTINGS_FACTORY_DEFAULT.middle, saved && saved.middle),
       lower: Object.assign({}, RSI_SETTINGS_FACTORY_DEFAULT.lower, saved && saved.lower),
+      extension: Object.assign({}, RSI_SETTINGS_FACTORY_DEFAULT.extension, saved && saved.extension),
     };
   } catch (e) {
     return JSON.parse(JSON.stringify(RSI_SETTINGS_FACTORY_DEFAULT));
@@ -1515,23 +1528,14 @@ function applyRsiSettings() {
     lineWidth: rsiSettings.line.lineWidth,
     lineStyle: LINE_STYLE_MAP[rsiSettings.line.lineStyle],
   });
-  // Tracks RSI's own line color (lighter) and a dotted style, regardless
-  // of what line style the user picked for the real line - this segment
-  // means something different (not-yet-real data), so it should always
-  // look visually distinct rather than following the user's solid/
-  // dashed/dotted choice for the real line.
+  // Independently configurable via the "Extension Line" section of this
+  // same settings panel - not derived from the real RSI line's own
+  // color/width/style, so it can be tuned freely.
   if (rsiExtensionSeries) {
-    // Regular Dotted (not LINE_STYLE_MAP.dotted, which is SparseDotted -
-    // wide gaps, chosen elsewhere specifically to read as distinct from
-    // Dashed) - this segment needs the opposite: small, tightly-packed
-    // dots so it doesn't look barely-there over a short span. Lighter
-    // (faded) color rather than full opacity - the extra line width
-    // keeps it visible even at reduced opacity, and the lighter color is
-    // itself part of what marks this as "not real data."
     rsiExtensionSeries.applyOptions({
-      color: colorWithOpacity(rsiSettings.line.color, 0.5),
-      lineWidth: Math.max(4, rsiSettings.line.lineWidth + 3),
-      lineStyle: LightweightCharts.LineStyle.Dotted,
+      color: rsiSettings.extension.color,
+      lineWidth: rsiSettings.extension.lineWidth,
+      lineStyle: LINE_STYLE_MAP[rsiSettings.extension.lineStyle],
     });
   }
 
@@ -1678,11 +1682,26 @@ function loadRsiData(tf) {
       rsiSeries.setData(rsiRealComputed.concat(data.slice(rsiRealIdx + 1).map(d => ({ time: d.time }))));
       // Bridges the gap to the main chart's current real boundary when
       // RSI's own timeframe is coarser and its current period hasn't
-      // closed yet - see buildLastValueExtension's own comment.
-      rsiExtensionSeries.setData(buildLastValueExtension(
-        rsiRealComputed[rsiRealComputed.length - 1],
-        convertTimeBetweenTF(barsData[lastRealBarIndex(barsData)].time, currentTF, tf)
-      ));
+      // closed yet - see buildLastValueExtension's own comment. Guarded
+      // on barsData actually having loaded - on initial page load, RSI's
+      // OWN fetch (kicked off by createRsiChart(), early in the script)
+      // can resolve before the main chart's loadTimeframe('daily') call
+      // (much later in the script) does, leaving barsData still [] here.
+      // barsData[lastRealBarIndex(barsData)] on an empty array is
+      // undefined, and .time on that threw - caught by this function's
+      // own .catch(), which showed the misleading "could not load"
+      // status/no-data state even though rsiSeries.setData() just above
+      // had already succeeded. loadTimeframe's own rsiTF === tf branch
+      // recomputes this correctly once main's data actually arrives, so
+      // skipping it here for that one moment is enough - confirmed this
+      // was the actual cause of a real, reliably-reproducing bug, not
+      // just a stale status message.
+      if (barsData.length > 0) {
+        rsiExtensionSeries.setData(buildLastValueExtension(
+          rsiRealComputed[rsiRealComputed.length - 1],
+          convertTimeBetweenTF(barsData[lastRealBarIndex(barsData)].time, currentTF, tf)
+        ));
+      }
       rsiPane.refreshForTimeframe();
       // Set RSI's initial view to match the main chart's CURRENT
       // calendar range (converted to RSI's own timeframe format), same
@@ -2533,7 +2552,7 @@ function renderRsiSettingsPanel() {
     addRow('Thickness', widthSelect);
 
     const styleSelect = document.createElement('select');
-    [['solid', 'Solid'], ['dashed', 'Dashed'], ['dotted', 'Dotted']].forEach(([v, label]) => {
+    [['solid', 'Solid'], ['dashed', 'Dashed'], ['tightDotted', 'Dotted (tight)'], ['dotted', 'Dotted (wide)']].forEach(([v, label]) => {
       const opt = document.createElement('option');
       opt.value = v; opt.textContent = label;
       if (v === styleObj.lineStyle) opt.selected = true;
@@ -2566,6 +2585,13 @@ function renderRsiSettingsPanel() {
 
   addSectionHeader('RSI Line');
   makeStyleRows(rsiSettings.line);
+
+  // The gap-bridging line shown when RSI's own timeframe is coarser than
+  // the main chart's and the current period hasn't closed yet (see
+  // buildLastValueExtension) - independently styleable like everything
+  // else here, not tied to the real RSI line's own color/width/style.
+  addSectionHeader('Extension Line');
+  makeStyleRows(rsiSettings.extension);
 
   // Each level gets its own On/Off + threshold value, PLUS its own
   // independent color/thickness/line-type - no longer a shared style

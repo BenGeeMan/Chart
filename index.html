@@ -964,7 +964,7 @@
       <div id="earnings-overlay"></div>
       <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">91</div>
+      <div id="build-number">92</div>
       <div id="main-no-data">No Data</div>
       <div id="rsi-settings-overlay"></div>
       <div id="macd-settings-overlay"></div>
@@ -1366,19 +1366,31 @@ function broadcastRange(srcPane, range) {
 
   // If we clamped, snap the source pane itself back into the allowed window
   // (so the user can't scroll it past main's data - it springs back).
+  // srcClampedRange (the source's snapped logical range) is reused for
+  // same-TF destinations below.
+  let srcClampedRange = null;
   if (clamped && fromT != null && toT != null) {
-    const st = paneRangeForWindow(srcPane, fromT, toT, srcTF);
-    recordApplied(srcPane, st);
-    srcPane.chart().timeScale().setVisibleLogicalRange(st);
+    srcClampedRange = paneRangeForWindow(srcPane, fromT, toT, srcTF);
+    recordApplied(srcPane, srcClampedRange);
+    srcPane.chart().timeScale().setVisibleLogicalRange(srcClampedRange);
   }
 
   for (const dst of syncPanes) {
     if (dst === srcPane || !dst.chart()) continue;
-    // Exact bar-index passthrough for a same-TF pane when nothing clamped -
-    // keeps a same-TF drag perfectly smooth (no calendar round-tripping).
     let target;
-    if (dst.getTF() === srcTF && !clamped) target = range;
-    else if (fromT != null && toT != null) target = paneRangeForWindow(dst, fromT, toT, srcTF);
+    if (dst.getTF() === srcTF) {
+      // Same timeframe = identical bar indexing as the source, so use the
+      // source's own LOGICAL range directly - exact, no calendar
+      // round-trip. Doing the round-trip here (as the code used to, once
+      // clamped) introduces rounding that at extreme zoom - where one bar
+      // is hundreds of px wide - shows up as the pane "stretching" or
+      // "accelerating away" when panned to the data boundary. Use the
+      // snapped range when clamped, otherwise the raw incoming range.
+      target = clamped ? srcClampedRange : range;
+    } else if (fromT != null && toT != null) {
+      // Cross-timeframe genuinely needs the calendar conversion.
+      target = paneRangeForWindow(dst, fromT, toT, srcTF);
+    }
     if (!target) continue;
     recordApplied(dst, target); // record BEFORE setting, so a sync echo is caught
     dst.chart().timeScale().setVisibleLogicalRange(target);

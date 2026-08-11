@@ -799,6 +799,19 @@
     margin: 10px 0 4px;
   }
   .rsi-settings-section:first-child { margin-top: 0; }
+  /* Two-column settings panel: short + wide so it doesn't run off the chart. */
+  .settings-2col { width: 384px; }
+  .settings-2col .settings-body {
+    column-count: 2;
+    column-gap: 18px;
+  }
+  .settings-2col .settings-section-group {
+    break-inside: avoid;
+    -webkit-column-break-inside: avoid;
+  }
+  /* first section in each column shouldn't add top margin */
+  .settings-2col .settings-section-group .rsi-settings-section { margin-top: 0; padding-top: 6px; }
+  .settings-2col .settings-section-group:first-child .rsi-settings-section { padding-top: 0; }
   .rsi-level-controls {
     display: flex;
     align-items: center;
@@ -1022,7 +1035,7 @@
       <div id="earnings-overlay"></div>
       <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">99</div>
+      <div id="build-number">100</div>
       <div id="main-no-data">No Data</div>
       <div id="rsi-settings-overlay"></div>
       <div id="macd-settings-overlay"></div>
@@ -3185,7 +3198,7 @@ function renderRsiSettingsPanel() {
   if (!rsiSettingsPanelOpen) return;
 
   const panel = document.createElement('div');
-  panel.className = 'drawing-settings-panel rsi-settings-panel';
+  panel.className = 'drawing-settings-panel rsi-settings-panel settings-2col';
   // Centered within the spacious main chart area (this overlay's own
   // parent) - transform-based centering so it stays centered
   // regardless of the panel's actual height (which varies now that
@@ -3202,6 +3215,15 @@ function renderRsiSettingsPanel() {
   panel.appendChild(dragHandle);
   makeDraggable(panel, dragHandle);
 
+  // Sections flow into a 2-column body (see .settings-2col CSS) so the panel
+  // is short and wide instead of one tall column that runs off the chart.
+  // Each section (header + its rows) is a group that can't be split across
+  // columns. addRow appends to the current group.
+  const body = document.createElement('div');
+  body.className = 'settings-body';
+  panel.appendChild(body);
+  let currentSection = null;
+
   function addRow(labelText, inputEl) {
     const row = document.createElement('div');
     row.className = 'row';
@@ -3209,14 +3231,17 @@ function renderRsiSettingsPanel() {
     label.textContent = labelText;
     row.appendChild(label);
     row.appendChild(inputEl);
-    panel.appendChild(row);
+    (currentSection || body).appendChild(row);
   }
 
   function addSectionHeader(text) {
+    currentSection = document.createElement('div');
+    currentSection.className = 'settings-section-group';
     const h = document.createElement('div');
     h.className = 'rsi-settings-section';
     h.textContent = text;
-    panel.appendChild(h);
+    currentSection.appendChild(h);
+    body.appendChild(currentSection);
   }
 
   function applyLive() {
@@ -3270,7 +3295,7 @@ function renderRsiSettingsPanel() {
     persistRsiLayout();
   });
   positionRow.appendChild(positionSelect);
-  panel.appendChild(positionRow);
+  currentSection.appendChild(positionRow);
 
   // Priority (0-99): ordering among panes on the same side; lower = nearer
   // the main chart.
@@ -3291,7 +3316,7 @@ function renderRsiSettingsPanel() {
     persistRsiLayout();
   });
   priorityRow.appendChild(priorityInput);
-  panel.appendChild(priorityRow);
+  currentSection.appendChild(priorityRow);
 
   addSectionHeader('RSI Line');
   makeStyleRows(rsiSettings.line);
@@ -3345,7 +3370,7 @@ function renderRsiSettingsPanel() {
     wrap.appendChild(cb);
     wrap.appendChild(valueInput);
     row.appendChild(wrap);
-    panel.appendChild(row);
+    currentSection.appendChild(row);
 
     makeStyleRows(rsiSettings[key]);
   }

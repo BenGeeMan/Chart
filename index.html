@@ -884,7 +884,7 @@
       <div id="earnings-overlay"></div>
       <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">82</div>
+      <div id="build-number">83</div>
       <div id="main-no-data">No Data</div>
       <div id="rsi-settings-overlay"></div>
     </div>
@@ -1119,6 +1119,55 @@ function sourceVisibleTime(sourceChart, range, bars, tf) {
     to: (range.to <= n - 1 && clamped) ? clamped.to : logicalIndexToTFTime(range.to, bars, tf),
   };
 }
+
+// Applies a source pane's just-changed visible logical range onto a
+// destination pane, keeping both panes showing the same CALENDAR window.
+// This is the single, pane-agnostic core of the cross-pane pan/zoom
+// sync - the two directional handlers (main->indicator and
+// indicator->main) are identical apart from which pane is source and
+// which is destination, so both call this rather than copy-pasting the
+// body (which is exactly the RSI-specific coupling that made adding a
+// second indicator pane hard - see CHART_HANDOFF.md Section 0 item 3).
+//
+// A "pane" here is a plain descriptor of three getters:
+// { chart(), bars(), getTF() }. All three are functions, not bare
+// values, so the descriptor can be built ONCE and still read each pane's
+// LIVE state on every event: `rsiChart` is reassigned (RSI can be
+// toggled off to null and recreated), the `barsData`/`rsiBarsData`
+// arrays are reassigned on every data load, and both `currentTF` and
+// `rsiTF` change as the user switches timeframes.
+//
+// Same-timeframe fast path: when both panes are on the same timeframe,
+// bar index means the same thing on both, so the range passes straight
+// through untouched - this is what keeps a same-TF drag perfectly smooth
+// (no per-frame calendar-time round-tripping, which snaps to whole-bar
+// boundaries on daily-and-up and visibly jitters). Only when the
+// timeframes differ do we convert through calendar time, edge-by-edge
+// via sourceVisibleTime (asymmetric clamping - see its callers' notes)
+// and position by logical index (setVisibleLogicalRange, never
+// setVisibleRange - the latter silently clamps a target time beyond the
+// destination's own loaded data; see timeToLogicalIndex's comment).
+function applyCrossPaneRange(src, dst, range) {
+  const srcTF = src.getTF(), dstTF = dst.getTF();
+  if (srcTF === dstTF) {
+    dst.chart().timeScale().setVisibleLogicalRange(range);
+    return;
+  }
+  const { from: fromT, to: toT } = sourceVisibleTime(src.chart(), range, src.bars(), srcTF);
+  if (fromT != null && toT != null) {
+    dst.chart().timeScale().setVisibleLogicalRange({
+      from: timeToLogicalIndex(convertTimeBetweenTF(fromT, srcTF, dstTF), dst.bars()),
+      to: timeToLogicalIndex(convertTimeBetweenTF(toT, srcTF, dstTF), dst.bars()),
+    });
+  }
+}
+
+// The two pane descriptors the sync handlers pass to applyCrossPaneRange.
+// Defined once here; their getters read live globals (see the comment on
+// applyCrossPaneRange). A future second indicator pane would add its own
+// descriptor of the same shape and participate in the same sync.
+const mainSyncPane = { chart: () => chart,    bars: () => barsData,    getTF: () => currentTF };
+const rsiSyncPane  = { chart: () => rsiChart, bars: () => rsiBarsData, getTF: () => rsiTF };
 
 // Builds a short, flat "last value carried forward" segment bridging
 // the gap between an indicator's own last REAL (completed) bar and some
@@ -1612,26 +1661,10 @@ function createRsiChart() {
   rsiChart.timeScale().subscribeVisibleLogicalRangeChange(range => {
     if (suppressSync || !range || syncingFromMain) return;
     syncingFromRsi = true;
-    if (rsiTF === currentTF) {
-      chart.timeScale().setVisibleLogicalRange(range);
-    } else {
-      const { from: fromT, to: toT } = sourceVisibleTime(rsiChart, range, rsiBarsData, rsiTF);
-      if (fromT != null && toT != null) {
-        // setVisibleLogicalRange, not setVisibleRange - see
-        // sourceVisibleTime's comment on the "to" edge: a calendar time
-        // beyond the DESTINATION chart's own loaded data has nothing
-        // for setVisibleRange to anchor to, so it silently clamps
-        // instead of showing the requested overscroll - confirmed
-        // directly (asked for a date a year past main's last bar, main
-        // still clamped to its own last bar). timeToLogicalIndex extends
-        // past the array via the same extrapolation math regardless,
-        // and setVisibleLogicalRange has no such clamping problem.
-        chart.timeScale().setVisibleLogicalRange({
-          from: timeToLogicalIndex(convertTimeBetweenTF(fromT, rsiTF, currentTF), barsData),
-          to: timeToLogicalIndex(convertTimeBetweenTF(toT, rsiTF, currentTF), barsData),
-        });
-      }
-    }
+    // Source = RSI, destination = main. All the same-TF-passthrough vs.
+    // cross-TF calendar-conversion logic (and the setVisibleLogicalRange-
+    // not-setVisibleRange reasoning) lives in applyCrossPaneRange now.
+    applyCrossPaneRange(rsiSyncPane, mainSyncPane, range);
     // Resetting this synchronously right after the call above assumes
     // the main chart's own range-change event (which the guard exists
     // to suppress) fires SYNCHRONOUSLY within that call - true most of
@@ -1749,19 +1782,9 @@ document.querySelectorAll('.rsi-tf-btn').forEach(btn => {
 chart.timeScale().subscribeVisibleLogicalRangeChange(range => {
   if (suppressSync || !range || syncingFromRsi || !rsiChart) return;
   syncingFromMain = true;
-  if (rsiTF === currentTF) {
-    rsiChart.timeScale().setVisibleLogicalRange(range);
-  } else {
-    const { from: fromT, to: toT } = sourceVisibleTime(chart, range, barsData, currentTF);
-    if (fromT != null && toT != null) {
-      // setVisibleLogicalRange, not setVisibleRange - see the matching
-      // comment on the other sync direction above.
-      rsiChart.timeScale().setVisibleLogicalRange({
-        from: timeToLogicalIndex(convertTimeBetweenTF(fromT, currentTF, rsiTF), rsiBarsData),
-        to: timeToLogicalIndex(convertTimeBetweenTF(toT, currentTF, rsiTF), rsiBarsData),
-      });
-    }
-  }
+  // Source = main, destination = RSI - the mirror of RSI's half above,
+  // through the same shared applyCrossPaneRange core.
+  applyCrossPaneRange(mainSyncPane, rsiSyncPane, range);
   // Deferred reset - see the matching comment on RSI's half of the sync
   // (above, in createRsiChart) for why a synchronous reset isn't safe.
   requestAnimationFrame(() => { syncingFromMain = false; });

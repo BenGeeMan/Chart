@@ -236,17 +236,28 @@ descriptor per pane. Three functions carry the model:
   dst should show, does not set it (so the caller can record it first).
 - `broadcastRange(srcPane, range)` (~L1277) — each pane's timeScale
   subscription calls this; it pushes the range to every *other* live pane.
-  Two guards: (1) `syncInProgress` (reset one frame later) blocks
+  Three guards against a destination pane's echo being mistaken for a
+  fresh user gesture: (1) `syncInProgress` (reset one frame later) blocks
   synchronous re-entry; (2) **echo suppression by value** —
-  `lastAppliedRange` (a WeakMap pane→range) records what we set on each
-  pane *before* setting it, and any incoming range matching it
-  (`rangesClose`, tol 0.05 bar) is ignored. This is what stops three
-  panes drifting apart under aggressive rapid wheel-zoom: the library
-  fires a destination's echo several frames *late*, past the
-  `syncInProgress` reset, and each late echo would otherwise re-broadcast
-  a re-converted range — cross-TF conversion is lossy, so the round-trips
-  accumulate error. Recognising the echo by value catches it regardless
-  of timing. Replaced the old pairwise `syncingFromMain`/`syncingFromRsi`
+  `lastAppliedRange` (WeakMap pane→range) records what we set on each pane
+  *before* setting it; an incoming range matching it (`rangesClose`, tol
+  0.05 bar) is ignored — catches late echoes regardless of frame timing;
+  (3) **echo suppression by recency** — `lastAppliedAt` (WeakMap
+  pane→timestamp); an event from a pane we set within `ECHO_WINDOW_MS`
+  (150ms) is ignored *even if its value differs*. Guard (3) is essential
+  when we ask a pane for a range it CAN'T show — e.g. scrolling a weekly
+  pane far back asks the daily main chart to zoom out past its
+  min-bar-spacing cap, so main **clamps** to a different range; that
+  clamped echo's value won't match guard (2), and without (3) it gets
+  rebroadcast and the two panes fight, stuck at different windows (the
+  reported MACD-on-weekly scroll-back bug). Together these stop drift
+  under aggressive rapid wheel-zoom (cross-TF conversion is lossy, so any
+  un-suppressed round-trip accumulates error).
+  **Residual (not a bug):** a coarser-TF pane (weekly) holds more history
+  than a finer one (daily), and the daily chart cannot zoom out as far
+  (min-bar-spacing), so at full zoom-out the panes are right-edge aligned
+  but the coarse pane extends further left — a data-coverage limit, not a
+  sync fault. Replaced the old pairwise `syncingFromMain`/`syncingFromRsi`
   booleans, which did **not** generalize (a change from RSI reached main
   but not MACD). `suppressSync` still hard-mutes during TF-switch
   transitions.

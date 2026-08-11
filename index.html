@@ -952,7 +952,7 @@
       <div id="earnings-overlay"></div>
       <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">85</div>
+      <div id="build-number">86</div>
       <div id="main-no-data">No Data</div>
       <div id="rsi-settings-overlay"></div>
       <div id="macd-settings-overlay"></div>
@@ -1281,23 +1281,37 @@ const syncPanes = [mainSyncPane, rsiSyncPane, macdSyncPane];
 // fires. syncInProgress still guards the synchronous re-entry; suppressSync
 // still hard-mutes everything during a timeframe-switch transition.
 let syncInProgress = false;
-const lastAppliedRange = new WeakMap(); // pane descriptor -> {from,to} we last set on it
+const lastAppliedRange = new WeakMap(); // pane -> {from,to} we last set on it
+const lastAppliedAt = new WeakMap();    // pane -> timestamp (ms) we last set it
+const ECHO_WINDOW_MS = 150;
 function rangesClose(a, b) {
   return !!a && !!b && Math.abs(a.from - b.from) < 0.05 && Math.abs(a.to - b.to) < 0.05;
 }
 function broadcastRange(srcPane, range) {
   if (suppressSync || !range || syncInProgress) return;
-  // srcPane echoing back a range WE just set on it (from another pane's
-  // broadcast) - not a real user gesture, so don't rebroadcast it.
+  // Two ways srcPane's event can be an ECHO of a range WE set on it (from
+  // another pane's broadcast) rather than a fresh user gesture:
+  //  (a) BY VALUE - it matches what we set (the common, un-clamped case).
+  //  (b) BY RECENCY - we set this pane a moment ago and the library is
+  //      now reporting the range it actually settled on. This matters
+  //      when we asked for a range the pane CAN'T show (e.g. scrolling a
+  //      weekly pane far back asks the daily main chart to zoom out past
+  //      its min-bar-spacing cap); the pane CLAMPS to a different range,
+  //      so the echo's value won't match (a) - but it's still an echo,
+  //      not the user grabbing that pane. Without this, the clamped echo
+  //      gets rebroadcast and the two panes fight, ending up stuck at
+  //      different windows (the reported MACD-on-weekly scroll-back bug).
   if (rangesClose(range, lastAppliedRange.get(srcPane))) return;
+  const setAt = lastAppliedAt.get(srcPane);
+  if (setAt != null && (performance.now() - setAt) < ECHO_WINDOW_MS) return;
   syncInProgress = true;
   for (const dst of syncPanes) {
     if (dst === srcPane || !dst.chart()) continue;
     const target = computeCrossPaneRange(srcPane, dst, range);
     if (!target) continue;
-    // Record BEFORE setting, so dst's synchronous echo (if any) already
-    // sees it recorded and is dropped by the check above.
+    // Record BEFORE setting, so dst's synchronous echo already sees it.
     lastAppliedRange.set(dst, target);
+    lastAppliedAt.set(dst, performance.now());
     dst.chart().timeScale().setVisibleLogicalRange(target);
   }
   requestAnimationFrame(() => { syncInProgress = false; });
@@ -1329,6 +1343,7 @@ function reassertIndicatorRange(pane, targetFrom, targetTo, mainData, mainTF) {
   // Record it too, so once suppressSync lifts, this pane's echoed
   // range-change event is recognised as ours and not rebroadcast.
   lastAppliedRange.set(pane, applied);
+  lastAppliedAt.set(pane, performance.now());
   pane.chart().timeScale().setVisibleLogicalRange(applied);
 }
 

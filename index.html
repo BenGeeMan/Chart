@@ -180,7 +180,7 @@
     background: transparent;
   }
   #rsi-resize-handle:hover { background: rgba(41,98,255,0.15); }
-  #rsi-drawing-overlay {
+  #rsi-drawing-overlay, #macd-drawing-overlay {
     position: absolute;
     inset: 0;
     z-index: 5;
@@ -964,7 +964,7 @@
       <div id="earnings-overlay"></div>
       <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">94</div>
+      <div id="build-number">95</div>
       <div id="main-no-data">No Data</div>
       <div id="rsi-settings-overlay"></div>
       <div id="macd-settings-overlay"></div>
@@ -1002,6 +1002,7 @@
         <button class="macd-tf-btn" data-tf="quarterly">Q</button>
       </div>
       <div id="macd-chart"></div>
+      <div id="macd-drawing-overlay"></div>
       <div id="macd-no-data">No Data</div>
     </div>
   </div>
@@ -3418,19 +3419,20 @@ function setRsiEnabled(enabled) {
   }
 }
 
-// MACD's on/off, mirroring setRsiEnabled but simpler - MACD has no
-// drawing-pane controller to attach/reset (deferred parity item), so
-// this only creates/destroys the chart instance and toggles the
-// container. broadcastRange already skips a pane whose chart() is null,
-// so turning MACD off cleanly drops it out of the sync with no other
-// bookkeeping.
+// MACD's on/off, mirroring setRsiEnabled - creates/destroys the chart
+// instance and attaches/resets its drawing pane (macdPane) around each
+// re-creation/teardown, exactly like RSI. broadcastRange already skips a
+// pane whose chart() is null, so turning MACD off cleanly drops it out of
+// the sync with no other bookkeeping.
 function setMacdEnabled(enabled) {
   macdEnabled = enabled;
   document.getElementById('macd-chart-container').classList.toggle('hidden', !enabled);
   chart.applyOptions({ width: chartEl.clientWidth, height: chartEl.clientHeight });
   if (enabled) {
-    requestAnimationFrame(() => { createMacdChart(); });
+    requestAnimationFrame(() => { createMacdChart(); macdPane.attach(); });
   } else if (macdChart) {
+    if (sharedToolState.lockedPane === 'macd') sharedToolState.setTool('none');
+    macdPane.reset();
     macdChart.remove();
     macdChart = null;
     macdLineSeries = null;
@@ -4776,6 +4778,26 @@ const rsiPane = createDrawingPane({
 });
 if (rsiChart) rsiPane.attach();
 
+// MACD's drawing tools - same shared toolbar + tool-selection state as
+// mainPane/rsiPane (sharedToolState), just its own chart instance and
+// drawings. Same lifecycle caveat as rsiPane: MACD's chart is destroyed/
+// recreated on the Indicators-column toggle, so setMacdEnabled() calls
+// macdPane.attach()/reset() around each re-creation/teardown, and the
+// instance created at startup still needs this explicit attach(). Uses the
+// MACD line as its coordinate series; linear scale (isLog: false).
+const macdPane = createDrawingPane({
+  getChart: () => macdChart,
+  getSeries: () => macdLineSeries,
+  getContainerEl: () => macdChartEl,
+  getBars: () => macdBarsData,
+  getCurrentTFKey: () => macdTF,
+  overlayId: 'macd-drawing-overlay',
+  paneId: 'macd',
+  shared: sharedToolState,
+  isLog: false,
+});
+if (macdChart) macdPane.attach();
+
 // The one shared toolbar's buttons - clicking one arms that tool for
 // whichever pane gets clicked next (see sharedToolState/attach()).
 document.querySelectorAll('#draw-toolbar .draw-tool-btn').forEach((btn) => {
@@ -4789,7 +4811,8 @@ document.querySelectorAll('#draw-toolbar .draw-tool-btn').forEach((btn) => {
 // nothing to do, so trying both here is safe.
 document.addEventListener('keydown', (e) => {
   if (mainPane.handleKeydown(e)) return;
-  rsiPane.handleKeydown(e);
+  if (rsiPane.handleKeydown(e)) return;
+  macdPane.handleKeydown(e);
 });
 
 const shapeMap = { arrowUp: 'arrowUp', arrowDown: 'arrowDown', circle: 'circle' };
@@ -4864,14 +4887,20 @@ function renderCommands() {
       if (handleHlineCommand(mainPane, attrs, line, errors)) addedLines++;
     } else if (cmd === 'RSI_LINE') {
       if (handleHlineCommand(rsiPane, attrs, line, errors)) addedLines++;
+    } else if (cmd === 'MACD_LINE') {
+      if (macdChart && handleHlineCommand(macdPane, attrs, line, errors)) addedLines++;
     } else if (cmd === 'TRENDLINE' || cmd === 'RAY') {
       if (handleTrendRayCommand(mainPane, cmd, attrs, line, errors)) addedLines++;
     } else if (cmd === 'RSI_TRENDLINE' || cmd === 'RSI_RAY') {
       if (handleTrendRayCommand(rsiPane, cmd, attrs, line, errors)) addedLines++;
+    } else if (cmd === 'MACD_TRENDLINE' || cmd === 'MACD_RAY') {
+      if (macdChart && handleTrendRayCommand(macdPane, cmd, attrs, line, errors)) addedLines++;
     } else if (cmd === 'HRAY') {
       if (handleHrayCommand(mainPane, attrs, line, errors)) addedLines++;
     } else if (cmd === 'RSI_HRAY') {
       if (handleHrayCommand(rsiPane, attrs, line, errors)) addedLines++;
+    } else if (cmd === 'MACD_HRAY') {
+      if (macdChart && handleHrayCommand(macdPane, attrs, line, errors)) addedLines++;
     } else {
       errors.push(`Unknown command: "${line}"`);
     }
@@ -4892,6 +4921,7 @@ function clearAll() {
   refreshMarkers();
   mainPane.clearAllDrawings();
   rsiPane.clearAllDrawings();
+  if (macdChart) macdPane.clearAllDrawings();
   document.getElementById('input-box').value = '';
   setStatus('Chart cleared.', false);
   updateOutputBox();
@@ -4989,6 +5019,14 @@ function updateOutputBox() {
     lines.push('');
     lines.push('--- RSI Drawings ---');
     lines.push(rsiDrawingLines.join('\n'));
+  }
+
+  // MACD drawings, same idea with a MACD_ prefix.
+  const macdDrawingLines = macdChart ? buildDrawingCommandLines(macdPane.priceLines, macdPane.userDrawings, 'MACD_') : [];
+  if (macdDrawingLines.length) {
+    lines.push('');
+    lines.push('--- MACD Drawings ---');
+    lines.push(macdDrawingLines.join('\n'));
   }
 
   document.getElementById('output-box').value = lines.join('\n');

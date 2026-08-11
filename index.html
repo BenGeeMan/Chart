@@ -964,7 +964,7 @@
       <div id="earnings-overlay"></div>
       <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">92</div>
+      <div id="build-number">93</div>
       <div id="main-no-data">No Data</div>
       <div id="rsi-settings-overlay"></div>
       <div id="macd-settings-overlay"></div>
@@ -1337,59 +1337,66 @@ function broadcastRange(srcPane, range) {
   if (suppressSync || !range || syncInProgress) return;
 
   const srcTF = srcPane.getTF();
-  let { from: fromT, to: toT } = sourceVisibleTime(srcPane.chart(), range, srcPane.bars(), srcTF);
+  const srcBars = srcPane.bars();
 
-  // HARD-LOCK: clamp the window to main's data extent (bounds expressed in
-  // srcTF for comparison against the source's own edge times). Computed
-  // BEFORE the echo check below, because whether the source is out of
-  // bounds decides whether the echo check even applies.
+  // HARD-LOCK bounds as logical indices in the SOURCE's own bars: the source
+  // may not pan/zoom to show times outside the main chart's data window.
+  // minIdx/maxIdx are that window mapped into the source's indexing (for a
+  // same-TF source that's just [0, lastBar]; for a coarser-TF source it's
+  // the sub-range that overlaps main's data, so e.g. a weekly pane can't
+  // scroll back past main's first daily bar).
+  let minIdx = 0, maxIdx = srcBars.length - 1;
   const mb = mainDataBounds();
-  let clamped = false;
-  if (mb && fromT != null && toT != null) {
-    const loSrc = convertTimeBetweenTF(mb.loT, currentTF, srcTF);
-    const hiSrc = convertTimeBetweenTF(mb.hiT, currentTF, srcTF);
-    if (timeToNumeric(fromT) < timeToNumeric(loSrc)) { fromT = loSrc; clamped = true; }
-    if (timeToNumeric(toT) > timeToNumeric(hiSrc)) { toT = hiSrc; clamped = true; }
-    // If both edges got pushed the window could invert; guard it.
-    if (timeToNumeric(fromT) > timeToNumeric(toT)) { fromT = loSrc; toT = hiSrc; }
+  if (mb) {
+    minIdx = timeToLogicalIndex(convertTimeBetweenTF(mb.loT, currentTF, srcTF), srcBars);
+    maxIdx = timeToLogicalIndex(convertTimeBetweenTF(mb.hiT, currentTF, srcTF), srcBars);
   }
 
-  // Echo suppression applies ONLY to in-bounds changes. If the source is
-  // out of bounds (clamped), it MUST spring back regardless of whether this
-  // event looks like an echo - an out-of-bounds view is never valid. This
-  // is the fix for "springs back most of the time but sometimes doesn't":
-  // an out-of-bounds scroll that happened to arrive within the echo
-  // recency window used to be dropped here, leaving the pane stuck out of
-  // bounds. In-bounds echoes are still suppressed so nothing bounces.
+  // Clamp the incoming range into [minIdx, maxIdx] PRESERVING WIDTH: when an
+  // edge hits a bound, SLIDE the whole window instead of truncating that
+  // edge. Truncating one edge while the other kept moving shrank the window,
+  // which at a boundary turned a pan into a runaway zoom-in - "scroll out
+  // fully, then drag left and it accelerates away" (the drag pushed `to`
+  // past the last bar; `to` got pinned while `from` kept sliding in, so the
+  // window collapsed toward a couple of bars). Sliding keeps the zoom level
+  // fixed so a pan simply stops at the edge. Only shrink if the window is
+  // wider than the whole allowed span.
+  let from = range.from, to = range.to;
+  const width = to - from;
+  let clamped = false;
+  if (from < minIdx) { from = minIdx; to = from + width; clamped = true; }
+  if (to > maxIdx) { to = maxIdx; from = to - width; clamped = true; }
+  if (from < minIdx) { from = minIdx; clamped = true; } // window wider than the allowed span
+  const clampedRange = { from, to };
+
+  // Echo suppression applies ONLY to in-bounds changes. An out-of-bounds
+  // (clamped) source MUST spring back regardless of whether the event looks
+  // like an echo; in-bounds echoes are still dropped so nothing bounces.
   if (!clamped && isEcho(srcPane, range)) return;
   syncInProgress = true;
 
-  // If we clamped, snap the source pane itself back into the allowed window
-  // (so the user can't scroll it past main's data - it springs back).
-  // srcClampedRange (the source's snapped logical range) is reused for
-  // same-TF destinations below.
-  let srcClampedRange = null;
-  if (clamped && fromT != null && toT != null) {
-    srcClampedRange = paneRangeForWindow(srcPane, fromT, toT, srcTF);
-    recordApplied(srcPane, srcClampedRange);
-    srcPane.chart().timeScale().setVisibleLogicalRange(srcClampedRange);
+  if (clamped) {
+    recordApplied(srcPane, clampedRange);
+    srcPane.chart().timeScale().setVisibleLogicalRange(clampedRange);
   }
+
+  // Calendar times of the (clamped) window, only needed for cross-TF panes.
+  const fromT = logicalIndexToTFTime(clampedRange.from, srcBars, srcTF);
+  const toT = logicalIndexToTFTime(clampedRange.to, srcBars, srcTF);
 
   for (const dst of syncPanes) {
     if (dst === srcPane || !dst.chart()) continue;
     let target;
     if (dst.getTF() === srcTF) {
-      // Same timeframe = identical bar indexing as the source, so use the
-      // source's own LOGICAL range directly - exact, no calendar
-      // round-trip. Doing the round-trip here (as the code used to, once
-      // clamped) introduces rounding that at extreme zoom - where one bar
-      // is hundreds of px wide - shows up as the pane "stretching" or
-      // "accelerating away" when panned to the data boundary. Use the
-      // snapped range when clamped, otherwise the raw incoming range.
-      target = clamped ? srcClampedRange : range;
+      // Same timeframe = identical bar indexing, so use the source's logical
+      // range directly - exact, no calendar round-trip (whose rounding shows
+      // up as "stretch" at extreme zoom).
+      target = clampedRange;
     } else if (fromT != null && toT != null) {
-      // Cross-timeframe genuinely needs the calendar conversion.
-      target = paneRangeForWindow(dst, fromT, toT, srcTF);
+      target = {
+        from: timeToLogicalIndex(convertTimeBetweenTF(fromT, srcTF, dst.getTF()), dst.bars()),
+        to: timeToLogicalIndex(convertTimeBetweenTF(toT, srcTF, dst.getTF()), dst.bars()),
+      };
     }
     if (!target) continue;
     recordApplied(dst, target); // record BEFORE setting, so a sync echo is caught

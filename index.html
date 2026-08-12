@@ -219,21 +219,6 @@
     white-space: nowrap;
   }
   #chart-context-menu .ctx-item:hover { background: rgba(41,98,255,0.1); color: var(--accent); }
-  .vol-colors {
-    display: flex;
-    gap: 4px;
-    align-items: center;
-    padding: 2px 0 2px 22px;
-  }
-  .vol-colors input[type=color] {
-    width: 22px;
-    height: 16px;
-    padding: 0;
-    border: 1px solid var(--panel-border);
-    border-radius: 3px;
-    cursor: pointer;
-    background: none;
-  }
   #turnover-settings {
     position: fixed;
     z-index: 1000;
@@ -528,6 +513,11 @@
     margin: 0;
     cursor: pointer;
   }
+  /* The indicator NAME opens its style popup on click (the checkbox still
+     toggles visibility) - see openIndicatorStylePanel. Only rows that have
+     a styleable indicator get an .ind-name span; RSI/MACD/Turnover don't. */
+  #legend .ind-name { cursor: pointer; }
+  #legend .ind-name:hover { text-decoration: underline dotted; text-underline-offset: 2px; }
   #legend .swatch {
     display: inline-block;
     width: 12px;
@@ -1008,40 +998,36 @@
         <div id="indicators-panel">
           <div class="ind-col">
             <div class="ind-col-title"><input type="checkbox" checked class="col-master">Standard EMAs</div>
-            <label class="ind-row" data-series="ema_10"><input type="checkbox" checked><span class="swatch" style="background:#000000"></span>EMA 10</label>
-            <label class="ind-row" data-series="ema_20"><input type="checkbox" checked><span class="swatch" style="background:#2962ff"></span>EMA 20</label>
-            <label class="ind-row" data-series="ema_50"><input type="checkbox" checked><span class="swatch" style="background:#26a69a"></span>EMA 50</label>
-            <label class="ind-row" data-series="ema_200"><input type="checkbox" checked><span class="swatch" style="background:#ef5350"></span>EMA 200</label>
+            <label class="ind-row" data-series="ema_10"><input type="checkbox" checked><span class="swatch" style="background:#000000"></span><span class="ind-name">EMA 10</span></label>
+            <label class="ind-row" data-series="ema_20"><input type="checkbox" checked><span class="swatch" style="background:#2962ff"></span><span class="ind-name">EMA 20</span></label>
+            <label class="ind-row" data-series="ema_50"><input type="checkbox" checked><span class="swatch" style="background:#26a69a"></span><span class="ind-name">EMA 50</span></label>
+            <label class="ind-row" data-series="ema_200"><input type="checkbox" checked><span class="swatch" style="background:#ef5350"></span><span class="ind-name">EMA 200</span></label>
           </div>
           <div class="ind-col">
             <div class="ind-col-title"><input type="checkbox" class="col-master">M10s</div>
-            <label class="ind-row" data-mtf-ema="m5"><input type="checkbox"><span class="swatch" style="background:#e91e63"></span>5m</label>
-            <label class="ind-row" data-mtf-ema="m15"><input type="checkbox"><span class="swatch" style="background:#fb8c00"></span>15m</label>
-            <label class="ind-row" data-mtf-ema="hourly"><input type="checkbox"><span class="swatch" style="background:#8e24aa"></span>1H</label>
-            <label class="ind-row" data-mtf-ema="daily"><input type="checkbox"><span class="swatch" style="background:#3949ab"></span>Daily</label>
-            <label class="ind-row" data-mtf-ema="weekly"><input type="checkbox"><span class="swatch" style="background:#6d4c41"></span>Weekly</label>
-            <label class="ind-row" data-mtf-ema="monthly"><input type="checkbox"><span class="swatch" style="background:#00acc1"></span>Monthly</label>
-            <label class="ind-row" data-mtf-ema="quarterly"><input type="checkbox"><span class="swatch" style="background:#7cb342"></span>Quarterly</label>
+            <label class="ind-row" data-mtf-ema="m5"><input type="checkbox"><span class="swatch" style="background:#000000"></span><span class="ind-name">5m</span></label>
+            <label class="ind-row" data-mtf-ema="m15"><input type="checkbox"><span class="swatch" style="background:#000000"></span><span class="ind-name">15m</span></label>
+            <label class="ind-row" data-mtf-ema="hourly"><input type="checkbox"><span class="swatch" style="background:#000000"></span><span class="ind-name">1H</span></label>
+            <label class="ind-row" data-mtf-ema="daily"><input type="checkbox"><span class="swatch" style="background:#000000"></span><span class="ind-name">Daily</span></label>
+            <label class="ind-row" data-mtf-ema="weekly"><input type="checkbox"><span class="swatch" style="background:#000000"></span><span class="ind-name">Weekly</span></label>
+            <label class="ind-row" data-mtf-ema="monthly"><input type="checkbox"><span class="swatch" style="background:#000000"></span><span class="ind-name">Monthly</span></label>
+            <label class="ind-row" data-mtf-ema="quarterly"><input type="checkbox"><span class="swatch" style="background:#000000"></span><span class="ind-name">Quarterly</span></label>
           </div>
           <div class="ind-col">
             <div class="ind-col-title"><input type="checkbox" class="col-master">Relative M10s</div>
-            <label class="ind-row" data-rel-ema="rel0"><input type="checkbox"><span class="swatch" style="background:#00897b"></span>Current TF</label>
-            <label class="ind-row" data-rel-ema="rel1"><input type="checkbox"><span class="swatch" style="background:#f9a825"></span>1 TF above</label>
-            <label class="ind-row" data-rel-ema="rel2"><input type="checkbox"><span class="swatch" style="background:#455a64"></span>2 TFs above</label>
+            <label class="ind-row" data-rel-ema="rel0"><input type="checkbox"><span class="swatch" style="background:#000000"></span><span class="ind-name">Current TF</span></label>
+            <label class="ind-row" data-rel-ema="rel1"><input type="checkbox"><span class="swatch dashed" style="border-color:#000000"></span><span class="ind-name">1 TF above</span></label>
+            <label class="ind-row" data-rel-ema="rel2"><input type="checkbox"><span class="swatch dashed" style="border-color:#000000"></span><span class="ind-name">2 TFs above</span></label>
           </div>
           <div class="ind-col">
             <div class="ind-col-title"><input type="checkbox" checked class="col-master">Volume</div>
-            <label class="ind-row" data-series="turnover"><input type="checkbox" checked>Volume</label>
-            <div class="vol-colors" title="Volume bar colours">
-              <input type="color" id="vol-up-color" title="Up bar colour">
-              <input type="color" id="vol-down-color" title="Down bar colour">
-            </div>
-            <label class="ind-row" data-series="turnover_ema"><input type="checkbox" checked><span class="swatch dashed" style="border-color:#5b8ff9"></span>Volume EMA 20</label>
+            <label class="ind-row" data-series="turnover"><input type="checkbox" checked><span class="ind-name">Volume</span></label>
+            <label class="ind-row" data-series="turnover_ema"><input type="checkbox" checked><span class="swatch dashed" style="border-color:#5b8ff9"></span><span class="ind-name">Volume EMA 20</span></label>
           </div>
           <div class="ind-col">
             <div class="ind-col-title"><input type="checkbox" checked class="col-master">Events</div>
-            <label class="ind-row" data-series="earnings"><input type="checkbox" checked><span class="swatch" style="width:9px;height:9px;background:#ff9800;border-radius:2px;"></span>Earnings</label>
-            <label class="ind-row" data-series="ema_cross"><input type="checkbox" checked><span class="swatch" style="background:#ff9800;width:7px;height:7px;border-radius:50%;"></span>10/20 EMA cross</label>
+            <label class="ind-row" data-series="earnings"><input type="checkbox" checked><span class="swatch" style="width:9px;height:9px;background:#ff9800;border-radius:2px;"></span><span class="ind-name">Earnings</span></label>
+            <label class="ind-row" data-series="ema_cross"><input type="checkbox" checked><span class="swatch" style="background:#ff9800;width:7px;height:7px;border-radius:50%;"></span><span class="ind-name">10/20 EMA cross</span></label>
           </div>
           <div class="ind-col">
             <div class="ind-col-title"><input type="checkbox" checked class="col-master">Indicators</div>
@@ -1065,7 +1051,7 @@
       <div id="earnings-overlay"></div>
       <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">103</div>
+      <div id="build-number">104</div>
       <div id="main-no-data">No Data</div>
       <div id="rsi-settings-overlay"></div>
       <div id="macd-settings-overlay"></div>
@@ -2726,7 +2712,8 @@ function computeCrossoverMarkers(data) {
     const crossedUp = prev10 <= prev20 && cur10 > cur20;
     const crossedDown = prev10 >= prev20 && cur10 < cur20;
     if (crossedUp || crossedDown) {
-      out.push({ time: data[i].time, position: 'inBar', shape: 'circle', color: '#ff9800', text: '' });
+      const cs = indicatorStyles.ema_cross;
+      out.push({ time: data[i].time, position: 'inBar', shape: cs.shape, color: cs.color, size: cs.size, text: '' });
     }
   }
   return out;
@@ -2788,10 +2775,15 @@ function renderEarningsOverlay() {
   for (const barTime of barTimes) {
     const x = chart.timeScale().timeToCoordinate(barTime);
     if (x === null || x < badgeHalfWidth || x > maxX) continue;
+    const es = indicatorStyles.earnings;
     const el = document.createElement('div');
     el.className = 'earnings-badge';
     el.textContent = 'E';
     el.style.left = x + 'px';
+    el.style.background = es.color;
+    el.style.width = es.size + 'px';
+    el.style.height = es.size + 'px';
+    el.style.fontSize = Math.max(6, Math.round(es.size * 0.57)) + 'px';
     container.appendChild(el);
   }
 }
@@ -2806,22 +2798,17 @@ function candleWindowAround(anchorIdx) {
   return { from: anchorIdx - CANDLES_EACH_SIDE, to: anchorIdx + CANDLES_EACH_SIDE };
 }
 
-// User-adjustable volume histogram up/down bar colors (Indicators panel),
-// drawn at 45% opacity. Persisted; defaults match the chart's green/red.
-const VOLUME_COLORS_KEY = 'volumeColors_v1';
-const VOLUME_COLORS_DEFAULT = { up: '#26a69a', down: '#ef5350' };
-function loadVolumeColors() {
-  try { return Object.assign({}, VOLUME_COLORS_DEFAULT, JSON.parse(localStorage.getItem(VOLUME_COLORS_KEY) || 'null')); }
-  catch (e) { return Object.assign({}, VOLUME_COLORS_DEFAULT); }
-}
-let volumeColors = loadVolumeColors();
-function persistVolumeColors() { try { localStorage.setItem(VOLUME_COLORS_KEY, JSON.stringify(volumeColors)); } catch (e) {} }
+// Volume histogram up/down bar colours + transparency now live in the
+// unified indicatorStyles store (see below), edited via the same name-click
+// style popup as every other indicator. hexToRgba is still used by the
+// turnover-box background styling further down.
 function hexToRgba(hex, a) {
   const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex);
   return m ? `rgba(${parseInt(m[1],16)}, ${parseInt(m[2],16)}, ${parseInt(m[3],16)}, ${a})` : hex;
 }
 function volumeBarColor(bar) {
-  return bar.close >= bar.open ? hexToRgba(volumeColors.up, 0.45) : hexToRgba(volumeColors.down, 0.45);
+  const st = indicatorStyles.turnover;
+  return bar.close >= bar.open ? colorWithOpacity(st.up, st.opacity) : colorWithOpacity(st.down, st.opacity);
 }
 // Re-colors the volume histogram from the current barsData without a reload
 // (so a color change applies live), same pattern as paintMacdHist.
@@ -2854,6 +2841,276 @@ function applyTurnoverStyle() {
     el.querySelectorAll('.value, .label, .ind-title').forEach(s => { s.style.color = turnoverStyle.textColor; });
   });
 }
+
+// =====================================================================
+// Unified per-indicator styling
+// ---------------------------------------------------------------------
+// Every line/marker indicator in the Indicators menu (EXCEPT RSI, MACD
+// and Turnover, which have their own dedicated panels) gets a style
+// popup opened by clicking its NAME in the menu - the checkbox still
+// toggles visibility. One store (indicatorStyles), one factory-default
+// table, one save/restore pattern, mirroring the RSI/MACD panels: live
+// edits apply immediately but only persist as the default on "Set as
+// Default"; "Restore Default" reloads the saved (or factory) style.
+//
+// Four kinds:
+//   line   - EMAs, M10s, Relative M10s, Volume EMA 20: colour (12-swatch
+//            palette + custom) + SEPARATE opacity + thickness + line style
+//   volume - the histogram: up colour, down colour, separate opacity
+//   earnings - the HTML "E" badge: colour + size only (no line style)
+//   cross  - the 10/20 EMA-cross dots: colour + shape + size
+// =====================================================================
+const INDICATOR_STYLE_KEY = 'indicatorStyles_v1';
+// The same 12 distinguishable presets the drawing-tools Style panel uses.
+const IND_PALETTE = [
+  '#000000', '#2962ff', '#26a69a', '#ef5350', '#ff9800', '#8e24aa',
+  '#e91e63', '#6d4c41', '#00acc1', '#f9a825', '#455a64', '#3949ab',
+];
+const INDICATOR_KIND = {
+  ema_10: 'line', ema_20: 'line', ema_50: 'line', ema_200: 'line',
+  m5: 'line', m15: 'line', hourly: 'line', daily: 'line', weekly: 'line', monthly: 'line', quarterly: 'line',
+  rel0: 'line', rel1: 'line', rel2: 'line',
+  turnover_ema: 'line',
+  turnover: 'volume', earnings: 'earnings', ema_cross: 'cross',
+};
+const INDICATOR_LABEL = {
+  ema_10: 'EMA 10', ema_20: 'EMA 20', ema_50: 'EMA 50', ema_200: 'EMA 200',
+  m5: 'M10 · 5m', m15: 'M10 · 15m', hourly: 'M10 · 1H', daily: 'M10 · Daily',
+  weekly: 'M10 · Weekly', monthly: 'M10 · Monthly', quarterly: 'M10 · Quarterly',
+  rel0: 'Relative M10 · Current TF', rel1: 'Relative M10 · 1 TF above', rel2: 'Relative M10 · 2 TFs above',
+  turnover_ema: 'Volume EMA 20', turnover: 'Volume', earnings: 'Earnings', ema_cross: '10/20 EMA cross',
+};
+// Factory defaults. Per the spec: the M10s column and ALL Relative M10s
+// default to black; Relative M10s additionally default to a solid line for
+// the current timeframe, dashed for 1 TF above and dotted for 2 TFs above.
+const LINE = (color, lineStyle) => ({ color, opacity: 1, lineWidth: 1, lineStyle: lineStyle || 'solid' });
+const INDICATOR_STYLE_FACTORY = {
+  ema_10: LINE('#000000'), ema_20: LINE('#2962ff'), ema_50: LINE('#26a69a'), ema_200: LINE('#ef5350'),
+  m5: LINE('#000000'), m15: LINE('#000000'), hourly: LINE('#000000'), daily: LINE('#000000'),
+  weekly: LINE('#000000'), monthly: LINE('#000000'), quarterly: LINE('#000000'),
+  rel0: LINE('#000000', 'solid'), rel1: LINE('#000000', 'dashed'), rel2: LINE('#000000', 'dotted'),
+  turnover_ema: LINE('#5b8ff9', 'dashed'),
+  turnover: { up: '#26a69a', down: '#ef5350', opacity: 0.45 },
+  earnings: { color: '#ff9800', size: 14 },
+  ema_cross: { color: '#ff9800', shape: 'circle', size: 1 },
+};
+function clone(o) { return JSON.parse(JSON.stringify(o)); }
+function loadIndicatorStyles() {
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem(INDICATOR_STYLE_KEY) || '{}') || {}; } catch (e) { saved = {}; }
+  // One-time migration of the old standalone volume-colours store.
+  if (!saved.turnover) {
+    try {
+      const vc = JSON.parse(localStorage.getItem('volumeColors_v1') || 'null');
+      if (vc) saved.turnover = Object.assign({}, INDICATOR_STYLE_FACTORY.turnover, vc);
+    } catch (e) {}
+  }
+  const out = {};
+  Object.keys(INDICATOR_STYLE_FACTORY).forEach(id => {
+    out[id] = Object.assign({}, INDICATOR_STYLE_FACTORY[id], saved[id] || {});
+  });
+  return out;
+}
+let indicatorStyles = loadIndicatorStyles();
+function persistIndicatorStyles() {
+  try { localStorage.setItem(INDICATOR_STYLE_KEY, JSON.stringify(indicatorStyles)); } catch (e) {}
+}
+// The saved-or-factory style for one indicator, used by "Restore Default".
+function factoryOrSavedStyle(id) {
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem(INDICATOR_STYLE_KEY) || '{}') || {}; } catch (e) {}
+  return Object.assign({}, INDICATOR_STYLE_FACTORY[id], saved[id] || {});
+}
+// The chart series backing a 'line' indicator (all four line groups live
+// on different series maps).
+function indicatorLineSeries(id) {
+  if (emaSeries[id]) return emaSeries[id];
+  if (mtfEmaSeries[id]) return mtfEmaSeries[id];
+  if (relEmaSeries[id]) return relEmaSeries[id];
+  if (id === 'turnover_ema') return turnoverEmaSeries;
+  return null;
+}
+// Reflects an indicator's current colour onto its little menu swatch.
+function setIndicatorSwatch(id, hex) {
+  const row = document.querySelector(
+    `.ind-row[data-series="${id}"], .ind-row[data-mtf-ema="${id}"], .ind-row[data-rel-ema="${id}"]`);
+  if (!row) return;
+  const sw = row.querySelector('.swatch');
+  if (!sw) return;
+  sw.style.background = hex;
+  sw.style.borderTopColor = hex; // for the dashed swatch variant (height:0)
+}
+function applyIndicatorStyle(id) {
+  const st = indicatorStyles[id];
+  if (!st) return;
+  const kind = INDICATOR_KIND[id];
+  if (kind === 'line') {
+    const s = indicatorLineSeries(id);
+    if (!s) return;
+    s.applyOptions({
+      color: colorWithOpacity(st.color, st.opacity),
+      lineWidth: st.lineWidth,
+      lineStyle: LINE_STYLE_MAP[st.lineStyle] != null ? LINE_STYLE_MAP[st.lineStyle] : LightweightCharts.LineStyle.Solid,
+    });
+    setIndicatorSwatch(id, st.color);
+  } else if (kind === 'volume') {
+    paintVolume();
+  } else if (kind === 'earnings') {
+    setIndicatorSwatch(id, st.color);
+    renderEarningsOverlay();
+  } else if (kind === 'cross') {
+    setIndicatorSwatch(id, st.color);
+    crossoverMarkers = computeCrossoverMarkers(barsData);
+    crossoverSeries.setMarkers(crossoverMarkers);
+  }
+}
+function applyAllIndicatorStyles() {
+  Object.keys(INDICATOR_STYLE_FACTORY).forEach(id => applyIndicatorStyle(id));
+}
+
+// The style popup itself. Only one open at a time; outside-click / Escape
+// closes it. Positioned at the click, draggable by its header - the same
+// .drawing-settings-panel chrome as the drawing-tools Style panel.
+let indicatorStylePanelEl = null;
+function closeIndicatorStylePanel() {
+  if (indicatorStylePanelEl) { indicatorStylePanelEl.remove(); indicatorStylePanelEl = null; }
+}
+function openIndicatorStylePanel(id, clientX, clientY) {
+  closeIndicatorStylePanel();
+  const kind = INDICATOR_KIND[id];
+  const st = indicatorStyles[id];
+  if (!kind || !st) return;
+
+  const panel = document.createElement('div');
+  panel.className = 'drawing-settings-panel';
+  panel.style.left = Math.min(clientX, window.innerWidth - 120) + 'px';
+  panel.style.top = Math.min(clientY, window.innerHeight - 60) + 'px';
+  panel.addEventListener('mousedown', (e) => e.stopPropagation());
+  panel.addEventListener('click', (e) => e.stopPropagation());
+
+  const dragHandle = document.createElement('div');
+  dragHandle.className = 'panel-drag-handle';
+  dragHandle.textContent = INDICATOR_LABEL[id] || 'Style';
+  panel.appendChild(dragHandle);
+  makeDraggable(panel, dragHandle);
+
+  function addRow(labelText, inputEl) {
+    const row = document.createElement('div');
+    row.className = 'row';
+    const label = document.createElement('label');
+    label.textContent = labelText;
+    row.appendChild(label);
+    row.appendChild(inputEl);
+    panel.appendChild(row);
+  }
+  // A 12-swatch palette grid bound to get/set accessors; returns a sync
+  // fn that re-highlights the selected swatch.
+  function addSwatchGrid(getHex, setHex) {
+    const grid = document.createElement('div');
+    grid.className = 'color-swatch-grid';
+    const els = [];
+    function sync() {
+      const cur = (getHex() || '').toLowerCase();
+      els.forEach(el => el.classList.toggle('selected', el.dataset.color.toLowerCase() === cur));
+    }
+    IND_PALETTE.forEach(hex => {
+      const sw = document.createElement('button');
+      sw.className = 'color-swatch';
+      sw.style.background = hex;
+      sw.dataset.color = hex;
+      sw.title = hex;
+      sw.addEventListener('mousedown', (e) => e.stopPropagation());
+      sw.addEventListener('click', (e) => { e.stopPropagation(); setHex(hex); sync(); });
+      els.push(sw);
+      grid.appendChild(sw);
+    });
+    addRow('', grid);
+    return sync;
+  }
+  function addColorControls(getHex, setHex) {
+    const colorInput = document.createElement('input');
+    colorInput.type = 'color';
+    colorInput.value = getHex();
+    let sync;
+    colorInput.addEventListener('input', () => { setHex(colorInput.value); sync && sync(); });
+    addRow('Colour', colorInput);
+    sync = addSwatchGrid(getHex, (hex) => { colorInput.value = hex; setHex(hex); });
+    return { colorInput, sync };
+  }
+  function addOpacityRow(get, set, floor) {
+    const op = document.createElement('input');
+    op.type = 'range';
+    op.min = String(floor == null ? 10 : floor); op.max = '100'; op.step = '5';
+    op.value = String(Math.round((get() == null ? 1 : get()) * 100));
+    op.addEventListener('input', () => set(parseInt(op.value, 10) / 100));
+    addRow('Transparency', op);
+  }
+  function addSelectRow(labelText, options, get, set, parseNum) {
+    const sel = document.createElement('select');
+    options.forEach(([v, txt]) => {
+      const o = document.createElement('option');
+      o.value = String(v); o.textContent = txt;
+      if (String(v) === String(get())) o.selected = true;
+      sel.appendChild(o);
+    });
+    sel.addEventListener('change', () => set(parseNum ? parseInt(sel.value, 10) : sel.value));
+    addRow(labelText, sel);
+  }
+
+  const live = () => applyIndicatorStyle(id);
+
+  if (kind === 'line') {
+    addColorControls(() => st.color, (hex) => { st.color = hex; live(); });
+    addOpacityRow(() => st.opacity, (v) => { st.opacity = v; live(); });
+    addSelectRow('Thickness', [[1, '1px'], [2, '2px'], [3, '3px'], [4, '4px']], () => st.lineWidth, (v) => { st.lineWidth = v; live(); }, true);
+    addSelectRow('Line', [['solid', 'Solid'], ['dashed', 'Dashed'], ['tightDotted', 'Dotted (tight)'], ['dotted', 'Dotted (wide)']], () => st.lineStyle, (v) => { st.lineStyle = v; live(); });
+  } else if (kind === 'volume') {
+    const upLabel = document.createElement('div');
+    upLabel.className = 'rsi-settings-section'; upLabel.textContent = 'Up bars';
+    panel.appendChild(upLabel);
+    addColorControls(() => st.up, (hex) => { st.up = hex; live(); });
+    const downLabel = document.createElement('div');
+    downLabel.className = 'rsi-settings-section'; downLabel.textContent = 'Down bars';
+    panel.appendChild(downLabel);
+    addColorControls(() => st.down, (hex) => { st.down = hex; live(); });
+    addOpacityRow(() => st.opacity, (v) => { st.opacity = v; live(); });
+  } else if (kind === 'earnings') {
+    addColorControls(() => st.color, (hex) => { st.color = hex; live(); });
+    addSelectRow('Size', [[8, '8px'], [10, '10px'], [12, '12px'], [14, '14px'], [16, '16px'], [18, '18px'], [22, '22px'], [26, '26px']], () => st.size, (v) => { st.size = v; live(); }, true);
+  } else if (kind === 'cross') {
+    addColorControls(() => st.color, (hex) => { st.color = hex; live(); });
+    addSelectRow('Shape', [['circle', 'Circle'], ['square', 'Square'], ['arrowUp', 'Arrow up'], ['arrowDown', 'Arrow down']], () => st.shape, (v) => { st.shape = v; live(); });
+    addSelectRow('Size', [[1, 'Small'], [2, 'Medium'], [3, 'Large'], [4, 'X-large']], () => st.size, (v) => { st.size = v; live(); }, true);
+  }
+
+  const actions = document.createElement('div');
+  actions.className = 'panel-actions-row';
+  const setBtn = document.createElement('button');
+  setBtn.textContent = 'Set as Default';
+  setBtn.addEventListener('mousedown', (e) => e.stopPropagation());
+  setBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    persistIndicatorStyles();
+    setStatus('Saved as the default style for ' + (INDICATOR_LABEL[id] || id) + '.', false);
+  });
+  actions.appendChild(setBtn);
+  const restoreBtn = document.createElement('button');
+  restoreBtn.textContent = 'Restore Default';
+  restoreBtn.addEventListener('mousedown', (e) => e.stopPropagation());
+  restoreBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    indicatorStyles[id] = factoryOrSavedStyle(id);
+    applyIndicatorStyle(id);
+    openIndicatorStylePanel(id, clientX, clientY); // rebuild inputs from restored values
+  });
+  actions.appendChild(restoreBtn);
+  panel.appendChild(actions);
+
+  document.body.appendChild(panel);
+  indicatorStylePanelEl = panel;
+}
+document.addEventListener('click', () => closeIndicatorStylePanel());
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeIndicatorStylePanel(); });
 
 function loadTimeframe(tf) {
   const cfg = TIMEFRAME_META[tf];
@@ -3166,17 +3423,23 @@ document.querySelectorAll('#legend .ind-row[data-series]').forEach(row => {
   });
 });
 
-// Volume up/down bar colour pickers (Indicators panel). Live re-tint via
-// paintVolume(), persisted to volumeColors_v1.
-(function setupVolumeColorPickers() {
-  const up = document.getElementById('vol-up-color');
-  const down = document.getElementById('vol-down-color');
-  if (!up || !down) return;
-  up.value = volumeColors.up;
-  down.value = volumeColors.down;
-  up.addEventListener('input', () => { volumeColors.up = up.value; paintVolume(); persistVolumeColors(); });
-  down.addEventListener('input', () => { volumeColors.down = down.value; paintVolume(); persistVolumeColors(); });
-})();
+// Clicking an indicator's NAME opens its style popup. preventDefault stops
+// the wrapping <label> from also toggling the visibility checkbox; only rows
+// with a styleable indicator carry an .ind-name span (RSI/MACD/Turnover
+// don't, so they're untouched).
+document.querySelectorAll('#indicators-panel .ind-name').forEach(nameEl => {
+  const row = nameEl.closest('.ind-row');
+  if (!row) return;
+  const id = row.dataset.series || row.dataset.mtfEma || row.dataset.relEma;
+  if (!id || !INDICATOR_KIND[id]) return;
+  nameEl.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    openIndicatorStylePanel(id, e.clientX, e.clientY);
+  });
+});
+// Apply saved (or factory) styles now that the menu + series exist.
+applyAllIndicatorStyles();
 
 // Turnover box style controls (Indicators panel): background colour, text
 // colour, background transparency. Live-apply + persist. Also reflect the

@@ -448,7 +448,17 @@
     padding: 10px 14px;
     gap: 18px;
   }
-  #legend.expanded #indicators-panel { display: flex; }
+  #legend.expanded #indicators-panel { display: flex; flex-wrap: wrap; }
+  /* Rich Road Candles toggle sits on its own full-width row at the TOP of the
+     panel (flex-wrap lets it take a whole row above the columns). */
+  #richroad-toprow {
+    flex-basis: 100%;
+    width: 100%;
+    padding-bottom: 8px;
+    margin-bottom: 2px;
+    border-bottom: 1px solid var(--panel-border);
+  }
+  .richroad-hint { color: var(--text-dim); font-size: 10px; margin-left: 6px; }
   .ind-col {
     display: flex;
     flex-direction: column;
@@ -982,6 +992,9 @@
         <div class="headline" id="legend-headline">HPQ · Daily · NYSE</div>
         <button id="indicators-toggle" type="button">Indicators <span id="indicators-chevron">▾</span></button>
         <div id="indicators-panel">
+          <div id="richroad-toprow">
+            <label class="ind-row" data-series="richroad"><input type="checkbox" checked><span class="ind-name" style="font-weight:600;">Rich Road Candles</span><span class="richroad-hint">— click name for colours &amp; thresholds</span></label>
+          </div>
           <div class="ind-col">
             <div class="ind-col-title"><input type="checkbox" checked class="col-master">Standard EMAs</div>
             <label class="ind-row" data-series="ema_10"><input type="checkbox" checked><span class="swatch" style="background:#000000"></span><span class="ind-name">EMA 10</span></label>
@@ -1040,10 +1053,11 @@
       <div id="close-above-overlay"></div>
       <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">112</div>
+      <div id="build-number">113</div>
       <div id="main-no-data">No Data</div>
       <div id="rsi-settings-overlay"></div>
       <div id="macd-settings-overlay"></div>
+      <div id="richroad-overlay"></div>
     </div>
     <div id="rsi-chart-container">
       <div id="rsi-resize-handle" class="pane-resize-handle" title="Drag to resize"></div>
@@ -2974,8 +2988,8 @@ const INDICATOR_STYLE_FACTORY = {
   turnover_ema: LINE('#5b8ff9', 'dashed'),
   turnover: { up: '#26a69a', down: '#ef5350', opacity: 0.45 },
   earnings: { color: '#ff9800', size: 14 },
-  ema_cross: { color: '#ff9800', shape: 'circle', size: 1 },
-  close_above_20: { color: '#ff9800', shape: 'circle', size: 1 },
+  ema_cross: { color: '#ff9800', shape: 'circle', size: 2 },
+  close_above_20: { color: '#ff9800', shape: 'plus', size: 3 },
 };
 function clone(o) { return JSON.parse(JSON.stringify(o)); }
 function loadIndicatorStyles() {
@@ -3204,6 +3218,194 @@ function openIndicatorStylePanel(id, clientX, clientY) {
 document.addEventListener('click', () => closeIndicatorStylePanel());
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeIndicatorStylePanel(); });
 
+// =====================================================================
+// Rich Road Candles - per-candle recolouring by classification
+// ---------------------------------------------------------------------
+// Classifies each REAL candle into one of six types and recolours it
+// (body + border + wick) accordingly, via per-bar colour fields on the
+// candlestick series (paintCandles). Every threshold AND every colour is
+// user-adjustable in the Rich Road settings panel (renderRichRoadPanel).
+//
+// NOTE ON INTERPRETATION (the source criteria are partly qualitative, so
+// these are sensible, fully-adjustable defaults):
+//   - "move" = the candle BODY move, (close-open)/open*100 (signed).
+//   - "body ratio" = |close-open| / (high-low).
+//   - "open within X% of the low" = (open-low)/low*100 <= wick tolerance.
+//   - Precedence (first match wins): Red CB (bearish >= redMove) -> High CB
+//     -> Low CB -> DC -> DC2 (close above EMA10 or EMA20) -> Neutral CB.
+// =====================================================================
+const RICHROAD_KEY = 'richRoadCandles_v1';
+const RICHROAD_FACTORY = {
+  enabled: true,
+  colors: {
+    highCB:    '#2e1a9c', // navy / indigo - strong bullish
+    lowCB:     '#3d5afe', // blue - moderate bullish
+    dc:        '#43a047', // green - demand candle
+    dc2:       '#12a186', // teal - demand candle (breakout)
+    redCB:     '#f2334d', // red - bearish
+    neutralCB: '#ffffff', // white - no conviction
+  },
+  params: {
+    highAutoMove:  9.5, // move% that auto-qualifies High CB regardless of structure
+    highMinMove:   5,   // min move% for structural High CB
+    highBodyRatio: 0.6, // min body-to-range ratio for High CB
+    highWickTol:   5,   // max (open-low)/low % for High CB (low-wick tolerance)
+    lowMinMove:    3,   // min move% for Low CB
+    dcBodyRatio:   0.6, // min body ratio for DC
+    dcWickTol:     5,   // max (open-low)/low % for DC
+    redMove:       4,   // min down-move% for Red CB
+  },
+};
+function loadRichRoad() {
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem(RICHROAD_KEY) || '{}') || {}; } catch (e) { saved = {}; }
+  return {
+    enabled: saved.enabled != null ? saved.enabled : RICHROAD_FACTORY.enabled,
+    colors: Object.assign({}, RICHROAD_FACTORY.colors, saved.colors || {}),
+    params: Object.assign({}, RICHROAD_FACTORY.params, saved.params || {}),
+  };
+}
+let richRoad = loadRichRoad();
+function persistRichRoad() { try { localStorage.setItem(RICHROAD_KEY, JSON.stringify(richRoad)); } catch (e) {} }
+
+// Returns one of the six colour keys for a real bar, or null if unclassifiable.
+function classifyCandle(bar) {
+  const { open, high, low, close, ema_10, ema_20 } = bar;
+  if (open == null || close == null || high == null || low == null) return null;
+  const p = richRoad.params;
+  const range = high - low;
+  const bodyRatio = range > 0 ? Math.abs(close - open) / range : 0;
+  const movePct = open > 0 ? (close - open) / open * 100 : 0;      // signed body move
+  const lowerWickPct = low > 0 ? (open - low) / low * 100 : 0;     // open above the low
+  const bullish = close >= open;
+
+  // Red CB: bearish with a down move >= threshold.
+  if (!bullish && -movePct >= p.redMove) return 'redCB';
+
+  if (bullish) {
+    // High CB: auto-qualify on a big move, else strong structure.
+    if (movePct >= p.highAutoMove) return 'highCB';
+    if (movePct >= p.highMinMove && bodyRatio >= p.highBodyRatio && lowerWickPct <= p.highWickTol) return 'highCB';
+    // Low CB: moderate move.
+    if (movePct >= p.lowMinMove) return 'lowCB';
+    // DC: below the move threshold but strong structure.
+    if (bodyRatio >= p.dcBodyRatio && lowerWickPct <= p.dcWickTol) return 'dc';
+  }
+  // DC2: closes above the 10 or 20 EMA (breakout / continuation).
+  if ((ema_10 != null && close > ema_10) || (ema_20 != null && close > ema_20)) return 'dc2';
+  return 'neutralCB';
+}
+
+// (Re)builds the candlestick data - future bars as whitespace, real bars with
+// per-candle Rich Road colours when enabled (else the series' default colours).
+function paintCandles() {
+  if (!barsData.length) return;
+  const realIdx = lastRealBarIndex(barsData);
+  const data = barsData.map((d, i) => {
+    if (i > realIdx) return { time: d.time }; // future placeholder -> whitespace
+    if (!richRoad.enabled) return d;
+    const type = classifyCandle(d);
+    if (!type) return d;
+    const c = richRoad.colors[type];
+    return Object.assign({}, d, { color: c, borderColor: c, wickColor: c });
+  });
+  series.setData(data);
+}
+
+// Rich Road settings panel (Set/Restore Default like RSI/MACD). Colours get a
+// picker + the 12-swatch palette; thresholds get number inputs. All apply live.
+let richRoadPanelOpen = false;
+function renderRichRoadPanel() {
+  const container = document.getElementById('richroad-overlay');
+  if (!container) return;
+  container.innerHTML = '';
+  if (!richRoadPanelOpen) return;
+
+  const panel = document.createElement('div');
+  panel.className = 'drawing-settings-panel rsi-settings-panel settings-2col';
+  panel.style.top = '50%'; panel.style.left = '50%'; panel.style.transform = 'translate(-50%, -50%)';
+  panel.addEventListener('mousedown', (e) => e.stopPropagation());
+  panel.addEventListener('click', (e) => e.stopPropagation());
+  const dh = document.createElement('div');
+  dh.className = 'panel-drag-handle'; dh.textContent = 'Rich Road Candles';
+  panel.appendChild(dh); makeDraggable(panel, dh);
+
+  const body = document.createElement('div');
+  body.className = 'settings-body'; panel.appendChild(body);
+  let section = null;
+  function addSection(text) {
+    section = document.createElement('div'); section.className = 'settings-section-group';
+    const h = document.createElement('div'); h.className = 'rsi-settings-section'; h.textContent = text;
+    section.appendChild(h); body.appendChild(section);
+  }
+  function addRow(labelText, inputEl) {
+    const row = document.createElement('div'); row.className = 'row';
+    const l = document.createElement('label'); l.textContent = labelText;
+    row.appendChild(l); row.appendChild(inputEl); (section || body).appendChild(row);
+  }
+  function addColorRow(labelText, get, set) {
+    const wrap = document.createElement('div');
+    wrap.style.display = 'flex'; wrap.style.flexDirection = 'column'; wrap.style.gap = '4px'; wrap.style.flex = '1';
+    const ci = document.createElement('input'); ci.type = 'color'; ci.value = get();
+    let sync;
+    ci.addEventListener('input', () => { set(ci.value); sync(); paintCandles(); });
+    const grid = document.createElement('div'); grid.className = 'color-swatch-grid';
+    const els = [];
+    sync = () => { const cur = (get() || '').toLowerCase(); els.forEach(e => e.classList.toggle('selected', e.dataset.color.toLowerCase() === cur)); };
+    IND_PALETTE.forEach((hex) => {
+      const sw = document.createElement('button'); sw.className = 'color-swatch';
+      sw.style.background = hex; sw.dataset.color = hex; sw.title = hex;
+      sw.addEventListener('mousedown', (e) => e.stopPropagation());
+      sw.addEventListener('click', (e) => { e.stopPropagation(); ci.value = hex; set(hex); sync(); paintCandles(); });
+      els.push(sw); grid.appendChild(sw);
+    });
+    wrap.appendChild(ci); wrap.appendChild(grid);
+    addRow(labelText, wrap); sync();
+  }
+  function addNumRow(labelText, get, set, step, min, max) {
+    const inp = document.createElement('input'); inp.type = 'number'; inp.value = get();
+    if (step != null) inp.step = step; if (min != null) inp.min = min; if (max != null) inp.max = max;
+    inp.style.flex = '1';
+    inp.addEventListener('mousedown', (e) => e.stopPropagation());
+    inp.addEventListener('change', () => { const v = parseFloat(inp.value); if (!isNaN(v)) { set(v); paintCandles(); } });
+    addRow(labelText, inp);
+  }
+
+  addSection('Candle colours');
+  addColorRow('High CB', () => richRoad.colors.highCB, (v) => richRoad.colors.highCB = v);
+  addColorRow('Low CB', () => richRoad.colors.lowCB, (v) => richRoad.colors.lowCB = v);
+  addColorRow('DC', () => richRoad.colors.dc, (v) => richRoad.colors.dc = v);
+  addColorRow('DC2 (breakout)', () => richRoad.colors.dc2, (v) => richRoad.colors.dc2 = v);
+  addColorRow('Red CB', () => richRoad.colors.redCB, (v) => richRoad.colors.redCB = v);
+  addColorRow('Neutral CB', () => richRoad.colors.neutralCB, (v) => richRoad.colors.neutralCB = v);
+
+  addSection('High CB thresholds');
+  addNumRow('Auto-qualify move %', () => richRoad.params.highAutoMove, (v) => richRoad.params.highAutoMove = v, '0.1');
+  addNumRow('Min move %', () => richRoad.params.highMinMove, (v) => richRoad.params.highMinMove = v, '0.1');
+  addNumRow('Min body ratio (0-1)', () => richRoad.params.highBodyRatio, (v) => richRoad.params.highBodyRatio = v, '0.05', '0', '1');
+  addNumRow('Wick tol % (open above low)', () => richRoad.params.highWickTol, (v) => richRoad.params.highWickTol = v, '0.5');
+
+  addSection('Low CB / DC / Red CB');
+  addNumRow('Low CB min move %', () => richRoad.params.lowMinMove, (v) => richRoad.params.lowMinMove = v, '0.1');
+  addNumRow('DC min body ratio (0-1)', () => richRoad.params.dcBodyRatio, (v) => richRoad.params.dcBodyRatio = v, '0.05', '0', '1');
+  addNumRow('DC wick tol %', () => richRoad.params.dcWickTol, (v) => richRoad.params.dcWickTol = v, '0.5');
+  addNumRow('Red CB down move %', () => richRoad.params.redMove, (v) => richRoad.params.redMove = v, '0.1');
+
+  const actions = document.createElement('div'); actions.className = 'panel-actions-row';
+  const setBtn = document.createElement('button'); setBtn.textContent = 'Set as Default';
+  setBtn.addEventListener('mousedown', (e) => e.stopPropagation());
+  setBtn.addEventListener('click', (e) => { e.stopPropagation(); persistRichRoad(); setStatus('Saved Rich Road Candles as the default.', false); });
+  actions.appendChild(setBtn);
+  const resBtn = document.createElement('button'); resBtn.textContent = 'Restore Default';
+  resBtn.addEventListener('mousedown', (e) => e.stopPropagation());
+  resBtn.addEventListener('click', (e) => { e.stopPropagation(); const wasOn = richRoad.enabled; richRoad = loadRichRoad(); richRoad.enabled = wasOn; paintCandles(); renderRichRoadPanel(); });
+  actions.appendChild(resBtn);
+  panel.appendChild(actions);
+  container.appendChild(panel);
+}
+document.addEventListener('click', () => { if (richRoadPanelOpen) { richRoadPanelOpen = false; renderRichRoadPanel(); } });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && richRoadPanelOpen) { richRoadPanelOpen = false; renderRichRoadPanel(); } });
+
 function loadTimeframe(tf) {
   const cfg = TIMEFRAME_META[tf];
   const file = `${currentTicker.toLowerCase()}_${tf}.json`;
@@ -3259,8 +3461,9 @@ function loadTimeframe(tf) {
       // the same price visually merge into one solid horizontal line.
       // Lightweight Charts' "whitespace" points (bare {time}, no OHLC)
       // reserve the time slot without drawing anything.
-      const seriesData = data.map((d, i) => (i <= realIdx ? d : { time: d.time }));
-      series.setData(seriesData);
+      // Candlestick data (with optional Rich Road per-candle colouring) is
+      // built by paintCandles(), which reads barsData - set just above.
+      paintCandles();
       for (const key of Object.keys(emaSeries)) {
         if (key === 'ema_200') continue; // computed separately below, not in the data file
         emaSeries[key].setData(realData.filter(d => d[key] != null).map(d => ({ time: d.time, value: d[key] })));
@@ -3519,6 +3722,9 @@ document.querySelectorAll('#legend .ind-row[data-series]').forEach(row => {
     } else if (key === 'close_above_20') {
       closeAboveVisible = checkbox.checked;
       renderCloseAboveOverlay();
+    } else if (key === 'richroad') {
+      richRoad.enabled = checkbox.checked;
+      paintCandles();
     } else {
       toggleableSeries[key].applyOptions({ visible: checkbox.checked });
     }
@@ -3566,6 +3772,7 @@ function wirePanelName(seriesId, openPanel) {
 }
 wirePanelName('rsi', () => { rsiSettingsPanelOpen = true; renderRsiSettingsPanel(); });
 wirePanelName('macd', () => { macdSettingsPanelOpen = true; renderMacdSettingsPanel(); });
+wirePanelName('richroad', () => { richRoadPanelOpen = true; renderRichRoadPanel(); });
 
 // Apply saved (or factory) styles now that the menu + series exist.
 applyAllIndicatorStyles();

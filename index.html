@@ -1041,7 +1041,7 @@
       <div id="close-above-overlay"></div>
       <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">115</div>
+      <div id="build-number">116</div>
       <div id="main-no-data">No Data</div>
       <div id="rsi-settings-overlay"></div>
       <div id="macd-settings-overlay"></div>
@@ -3308,15 +3308,20 @@ function paintCandles() {
 // Rich Road settings panel (Set/Restore Default like RSI/MACD). Colours get a
 // picker + the 12-swatch palette; thresholds get number inputs. All apply live.
 let richRoadPanelOpen = false;
-function renderRichRoadPanel() {
+let richRoadPanelPos = null; // {x,y} where it was opened, so re-renders stay put
+function renderRichRoadPanel(clientX, clientY) {
   const container = document.getElementById('richroad-overlay');
   if (!container) return;
   container.innerHTML = '';
   if (!richRoadPanelOpen) return;
+  // Anchor at the cursor (like the other indicators' style popups), not centred.
+  if (clientX != null && clientY != null) richRoadPanelPos = { x: clientX, y: clientY };
+  const pos = richRoadPanelPos || { x: Math.round(window.innerWidth / 2), y: 90 };
 
   const panel = document.createElement('div');
   panel.className = 'drawing-settings-panel rsi-settings-panel settings-2col';
-  panel.style.top = '50%'; panel.style.left = '50%'; panel.style.transform = 'translate(-50%, -50%)';
+  panel.style.left = Math.min(pos.x, window.innerWidth - 120) + 'px';
+  panel.style.top = Math.min(pos.y, window.innerHeight - 60) + 'px';
   panel.addEventListener('mousedown', (e) => e.stopPropagation());
   panel.addEventListener('click', (e) => e.stopPropagation());
   const dh = document.createElement('div');
@@ -3768,13 +3773,13 @@ function wirePanelName(seriesId, openPanel) {
   const row = document.querySelector(`.ind-row[data-series="${seriesId}"]`);
   if (!row) return;
   const nameEl = row.querySelector('.ind-name');
-  const open = (e) => { e.preventDefault(); e.stopPropagation(); openPanel(); };
+  const open = (e) => { e.preventDefault(); e.stopPropagation(); openPanel(e); };
   if (nameEl) nameEl.addEventListener('click', open);
   row.addEventListener('contextmenu', open);
 }
 wirePanelName('rsi', () => { rsiSettingsPanelOpen = true; renderRsiSettingsPanel(); });
 wirePanelName('macd', () => { macdSettingsPanelOpen = true; renderMacdSettingsPanel(); });
-wirePanelName('richroad', () => { richRoadPanelOpen = true; renderRichRoadPanel(); });
+wirePanelName('richroad', (e) => { richRoadPanelOpen = true; renderRichRoadPanel(e && e.clientX, e && e.clientY); });
 
 // Apply saved (or factory) styles now that the menu + series exist.
 applyAllIndicatorStyles();

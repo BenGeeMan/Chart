@@ -1041,7 +1041,7 @@
       <div id="close-above-overlay"></div>
       <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">116</div>
+      <div id="build-number">117</div>
       <div id="main-no-data">No Data</div>
       <div id="rsi-settings-overlay"></div>
       <div id="macd-settings-overlay"></div>
@@ -3310,18 +3310,20 @@ function paintCandles() {
 let richRoadPanelOpen = false;
 let richRoadPanelPos = null; // {x,y} where it was opened, so re-renders stay put
 function renderRichRoadPanel(clientX, clientY) {
-  const container = document.getElementById('richroad-overlay');
-  if (!container) return;
-  container.innerHTML = '';
+  // Panel attaches to <body> (like the other indicators' style popups), NOT
+  // #richroad-overlay: that overlay lives inside the positioned main-chart-area,
+  // so an absolutely-positioned child was measured from the chart's origin and
+  // landed off-screen. On <body>, left/top are viewport-relative.
+  const existing = document.getElementById('richroad-panel');
+  if (existing) existing.remove();
   if (!richRoadPanelOpen) return;
   // Anchor at the cursor (like the other indicators' style popups), not centred.
   if (clientX != null && clientY != null) richRoadPanelPos = { x: clientX, y: clientY };
   const pos = richRoadPanelPos || { x: Math.round(window.innerWidth / 2), y: 90 };
 
   const panel = document.createElement('div');
+  panel.id = 'richroad-panel';
   panel.className = 'drawing-settings-panel rsi-settings-panel settings-2col';
-  panel.style.left = Math.min(pos.x, window.innerWidth - 120) + 'px';
-  panel.style.top = Math.min(pos.y, window.innerHeight - 60) + 'px';
   panel.addEventListener('mousedown', (e) => e.stopPropagation());
   panel.addEventListener('click', (e) => e.stopPropagation());
   const dh = document.createElement('div');
@@ -3408,7 +3410,16 @@ function renderRichRoadPanel(clientX, clientY) {
   resBtn.addEventListener('click', (e) => { e.stopPropagation(); const wasOn = richRoad.enabled; richRoad = loadRichRoad(); richRoad.enabled = wasOn; paintCandles(); renderRichRoadPanel(); });
   actions.appendChild(resBtn);
   panel.appendChild(actions);
-  container.appendChild(panel);
+  document.body.appendChild(panel);
+  // Clamp so the whole panel stays on-screen. It is wider than the style popups
+  // and the base .drawing-settings-panel class centres it via translateX(-50%),
+  // so the horizontal bounds are half-width margins on each side.
+  const w = panel.offsetWidth, h = panel.offsetHeight, margin = 8;
+  const minLeft = w / 2 + margin, maxLeft = window.innerWidth - w / 2 - margin;
+  const left = maxLeft < minLeft ? window.innerWidth / 2 : Math.max(minLeft, Math.min(pos.x, maxLeft));
+  const top = Math.max(margin, Math.min(pos.y, window.innerHeight - h - margin));
+  panel.style.left = left + 'px';
+  panel.style.top = top + 'px';
 }
 document.addEventListener('click', () => { if (richRoadPanelOpen) { richRoadPanelOpen = false; renderRichRoadPanel(); } });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && richRoadPanelOpen) { richRoadPanelOpen = false; renderRichRoadPanel(); } });

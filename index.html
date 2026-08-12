@@ -1041,7 +1041,7 @@
       <div id="close-above-overlay"></div>
       <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">117</div>
+      <div id="build-number">118</div>
       <div id="main-no-data">No Data</div>
       <div id="rsi-settings-overlay"></div>
       <div id="macd-settings-overlay"></div>
@@ -3324,6 +3324,7 @@ function renderRichRoadPanel(clientX, clientY) {
   const panel = document.createElement('div');
   panel.id = 'richroad-panel';
   panel.className = 'drawing-settings-panel rsi-settings-panel settings-2col';
+  panel.style.zIndex = '1000'; // sit above the legend / Indicators dropdown (like the style popups)
   panel.addEventListener('mousedown', (e) => e.stopPropagation());
   panel.addEventListener('click', (e) => e.stopPropagation());
   const dh = document.createElement('div');

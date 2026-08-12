@@ -591,6 +591,22 @@
     pointer-events: none;
     overflow: hidden;
   }
+  /* EMA 10/20 crossover dots - custom HTML/SVG markers (see
+     renderCrossoverOverlay), positioned via the chart's own
+     time/price-to-coordinate. Each .crossover-marker is centred on its point;
+     the inline SVG inside carries the shape (circle/square/arrows/cross). */
+  #crossover-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 4;
+    pointer-events: none;
+    overflow: hidden;
+  }
+  .crossover-marker {
+    position: absolute;
+    transform: translate(-50%, -50%);
+    line-height: 0;
+  }
   .earnings-badge {
     position: absolute;
     bottom: 38px;
@@ -1019,9 +1035,10 @@
         <div class="row"><span class="label">AT (20)</span><span class="value" id="turnover-daily-at20">—</span></div>
       </div>
       <div id="earnings-overlay"></div>
+      <div id="crossover-overlay"></div>
       <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">107</div>
+      <div id="build-number">108</div>
       <div id="main-no-data">No Data</div>
       <div id="rsi-settings-overlay"></div>
       <div id="macd-settings-overlay"></div>
@@ -1663,17 +1680,14 @@ function refreshAllEnabledRelEmas() {
   });
 }
 
-// Dedicated, fully transparent series that ONLY exists to host the EMA
-// 10/20 crossover dots. Kept separate from the actual EMA 10/20 lines so
-// its visibility (and checkbox) is independent - the dots are an event
-// indicator in their own right, not a decoration on the EMA 10 line.
-const crossoverSeries = chart.addLineSeries({
-  color: 'rgba(0,0,0,0)',
-  lineWidth: 1,
-  priceLineVisible: false,
-  lastValueVisible: false,
-  crosshairMarkerVisible: false,
-});
+// The EMA 10/20 crossover dots are drawn as a custom HTML overlay
+// (#crossover-overlay), NOT native chart markers - so shapes beyond the
+// library's four (circle/square/arrow-up/arrow-down) are possible, notably a
+// cross/X. crossoverPoints holds the {time, value} of each crossover bar;
+// renderCrossoverOverlay() positions a styled marker at each via the chart's
+// own time+price-to-coordinate, re-run on every pan/zoom/resize (the same
+// triggers as the earnings overlay). Independent on/off via crossoverVisible.
+let crossoverVisible = true;
 
 let earningsData = {};
 let earningsVisible = true;
@@ -2602,7 +2616,7 @@ function setToolTimeframeDefault(toolType, tfObj) {
 
 
 let markers = [];
-let crossoverMarkers = [];
+let crossoverPoints = [];
 let watchlistData = [];
 let currentVolumeEma3 = [];
 let currentVolumeEma20 = [];
@@ -2671,7 +2685,7 @@ function updateTurnoverBox(index) {
 // directly to the EMA 10 line series (not the candlestick series), so
 // the dot renders precisely on the line's actual value at that point,
 // not just "somewhere within that bar."
-function computeCrossoverMarkers(data) {
+function computeCrossoverPoints(data) {
   const out = [];
   for (let i = 1; i < data.length; i++) {
     const prev10 = data[i - 1].ema_10, prev20 = data[i - 1].ema_20;
@@ -2679,12 +2693,52 @@ function computeCrossoverMarkers(data) {
     if (prev10 == null || prev20 == null || cur10 == null || cur20 == null) continue;
     const crossedUp = prev10 <= prev20 && cur10 > cur20;
     const crossedDown = prev10 >= prev20 && cur10 < cur20;
-    if (crossedUp || crossedDown) {
-      const cs = indicatorStyles.ema_cross;
-      out.push({ time: data[i].time, position: 'inBar', shape: cs.shape, color: cs.color, size: cs.size, text: '' });
-    }
+    // The dot sits on the EMA 10 line at the crossover bar (same point the
+    // native marker used, via position:'inBar' + the ema_10 value).
+    if (crossedUp || crossedDown) out.push({ time: data[i].time, value: data[i].ema_10 });
   }
   return out;
+}
+
+// Builds the marker glyph as inline SVG so any shape is possible - including
+// the cross/X, which the native marker system (circle/square/arrows only)
+// can't draw.
+function crossoverShapeSVG(shape, color) {
+  const a = 'width="100%" height="100%" viewBox="0 0 10 10" preserveAspectRatio="xMidYMid meet"';
+  switch (shape) {
+    case 'square':    return `<svg ${a}><rect x="1" y="1" width="8" height="8" fill="${color}"/></svg>`;
+    case 'arrowUp':   return `<svg ${a}><polygon points="5,1 1,9 9,9" fill="${color}"/></svg>`;
+    case 'arrowDown': return `<svg ${a}><polygon points="1,1 9,1 5,9" fill="${color}"/></svg>`;
+    case 'cross':     return `<svg ${a}><path d="M2,2 L8,8 M8,2 L2,8" stroke="${color}" stroke-width="2.2" stroke-linecap="round"/></svg>`;
+    case 'circle':
+    default:          return `<svg ${a}><circle cx="5" cy="5" r="4" fill="${color}"/></svg>`;
+  }
+}
+// Positions a styled marker at every crossover point. Cheap (crossovers are
+// sparse); safe to call on every pan/zoom frame like the earnings overlay.
+function renderCrossoverOverlay() {
+  const container = document.getElementById('crossover-overlay');
+  if (!container) return;
+  container.innerHTML = '';
+  if (!crossoverVisible || !crossoverPoints.length || !barsData.length) return;
+  const st = indicatorStyles.ema_cross;
+  const px = 6 + (st.size || 1) * 3; // size 1..4 -> 9..18px
+  const priceScaleWidth = chart.priceScale('right').width();
+  const maxX = chartEl.clientWidth - priceScaleWidth;
+  for (const pt of crossoverPoints) {
+    const x = chart.timeScale().timeToCoordinate(pt.time);
+    if (x === null || x < 0 || x > maxX) continue;
+    const y = series.priceToCoordinate(pt.value);
+    if (y === null) continue;
+    const el = document.createElement('div');
+    el.className = 'crossover-marker';
+    el.style.left = x + 'px';
+    el.style.top = y + 'px';
+    el.style.width = px + 'px';
+    el.style.height = px + 'px';
+    el.innerHTML = crossoverShapeSVG(st.shape, st.color);
+    container.appendChild(el);
+  }
 }
 
 // Manual (user/Claude-added) markers stay on the candlestick series,
@@ -2928,8 +2982,8 @@ function applyIndicatorStyle(id) {
     renderEarningsOverlay();
   } else if (kind === 'cross') {
     setIndicatorSwatch(id, st.color);
-    crossoverMarkers = computeCrossoverMarkers(barsData);
-    crossoverSeries.setMarkers(crossoverMarkers);
+    crossoverPoints = computeCrossoverPoints(barsData);
+    renderCrossoverOverlay();
   }
 }
 function applyAllIndicatorStyles() {
@@ -3051,7 +3105,7 @@ function openIndicatorStylePanel(id, clientX, clientY) {
     addSelectRow('Size', [[8, '8px'], [10, '10px'], [12, '12px'], [14, '14px'], [16, '16px'], [18, '18px'], [22, '22px'], [26, '26px']], () => st.size, (v) => { st.size = v; live(); }, true);
   } else if (kind === 'cross') {
     addColorControls(() => st.color, (hex) => { st.color = hex; live(); });
-    addSelectRow('Shape', [['circle', 'Circle'], ['square', 'Square'], ['arrowUp', 'Arrow up'], ['arrowDown', 'Arrow down']], () => st.shape, (v) => { st.shape = v; live(); });
+    addSelectRow('Shape', [['circle', 'Circle'], ['square', 'Square'], ['cross', 'Cross'], ['arrowUp', 'Arrow up'], ['arrowDown', 'Arrow down']], () => st.shape, (v) => { st.shape = v; live(); });
     addSelectRow('Size', [[1, 'Small'], [2, 'Medium'], [3, 'Large'], [4, 'X-large']], () => st.size, (v) => { st.size = v; live(); }, true);
   }
 
@@ -3219,9 +3273,8 @@ function loadTimeframe(tf) {
       updateTurnoverBox(lastRealBarIndex(barsData));
 
       markers = [];
-      crossoverMarkers = computeCrossoverMarkers(data);
-      crossoverSeries.setData(data.filter(d => d.ema_10 != null).map(d => ({ time: d.time, value: d.ema_10 })));
-      crossoverSeries.setMarkers(crossoverMarkers);
+      crossoverPoints = computeCrossoverPoints(data);
+      renderCrossoverOverlay();
       renderEarningsOverlay();
       positionDailyBox();
       refreshMarkers();
@@ -3371,7 +3424,7 @@ document.querySelectorAll('.tf-btn').forEach(btn => {
 });
 
 // Toggle individual EMA / turnover-EMA lines on and off from the legend.
-const toggleableSeries = { ...emaSeries, ema_cross: crossoverSeries, turnover: turnoverSeries, turnover_ema: turnoverEmaSeries };
+const toggleableSeries = { ...emaSeries, turnover: turnoverSeries, turnover_ema: turnoverEmaSeries };
 document.querySelectorAll('#legend .ind-row[data-series]').forEach(row => {
   const key = row.dataset.series;
   const checkbox = row.querySelector('input');
@@ -3387,6 +3440,9 @@ document.querySelectorAll('#legend .ind-row[data-series]').forEach(row => {
       turnoverStyle.visible = checkbox.checked;
       applyTurnoverStyle();
       persistTurnoverStyle();
+    } else if (key === 'ema_cross') {
+      crossoverVisible = checkbox.checked;
+      renderCrossoverOverlay();
     } else {
       toggleableSeries[key].applyOptions({ visible: checkbox.checked });
     }
@@ -5742,6 +5798,7 @@ window.addEventListener('resize', () => {
     rsiChart.applyOptions({ width: rsiChartEl.clientWidth, height: rsiChartEl.clientHeight });
   }
   renderEarningsOverlay();
+  renderCrossoverOverlay();
   mainPane.refreshOverlay();
   rsiPane.refreshOverlay();
   positionDailyBox();
@@ -5754,6 +5811,7 @@ window.addEventListener('resize', () => {
 // own subscribeVisibleLogicalRangeChange, set up inside rsiPane.attach().
 chart.timeScale().subscribeVisibleLogicalRangeChange(() => {
   renderEarningsOverlay();
+  renderCrossoverOverlay();
   mainPane.refreshOverlay();
 });
 

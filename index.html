@@ -595,7 +595,7 @@
      renderCrossoverOverlay), positioned via the chart's own
      time/price-to-coordinate. Each .crossover-marker is centred on its point;
      the inline SVG inside carries the shape (circle/square/arrows/cross). */
-  #crossover-overlay {
+  #crossover-overlay, #close-above-overlay {
     position: absolute;
     inset: 0;
     z-index: 4;
@@ -1014,6 +1014,7 @@
             <div class="ind-col-title"><input type="checkbox" checked class="col-master">Events</div>
             <label class="ind-row" data-series="earnings"><input type="checkbox" checked><span class="swatch" style="width:9px;height:9px;background:#ff9800;border-radius:2px;"></span><span class="ind-name">Earnings</span></label>
             <label class="ind-row" data-series="ema_cross"><input type="checkbox" checked><span class="swatch" style="background:#ff9800;width:7px;height:7px;border-radius:50%;"></span><span class="ind-name">10/20 EMA cross</span></label>
+            <label class="ind-row" data-series="close_above_20"><input type="checkbox" checked><span class="swatch" style="background:#26a69a;width:7px;height:7px;border-radius:50%;"></span><span class="ind-name">Close &gt; 20 EMA</span></label>
           </div>
           <div class="ind-col">
             <div class="ind-col-title"><input type="checkbox" checked class="col-master">Indicators</div>
@@ -1036,9 +1037,10 @@
       </div>
       <div id="earnings-overlay"></div>
       <div id="crossover-overlay"></div>
+      <div id="close-above-overlay"></div>
       <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">110</div>
+      <div id="build-number">111</div>
       <div id="main-no-data">No Data</div>
       <div id="rsi-settings-overlay"></div>
       <div id="macd-settings-overlay"></div>
@@ -1687,7 +1689,10 @@ function refreshAllEnabledRelEmas() {
 // renderCrossoverOverlay() positions a styled marker at each via the chart's
 // own time+price-to-coordinate, re-run on every pan/zoom/resize (the same
 // triggers as the earnings overlay). Independent on/off via crossoverVisible.
+// The "Close above 20 EMA" event (close crossing up through the 20 EMA) uses
+// the same overlay machinery, in its own #close-above-overlay.
 let crossoverVisible = true;
+let closeAboveVisible = true;
 
 let earningsData = {};
 let earningsVisible = true;
@@ -2617,6 +2622,7 @@ function setToolTimeframeDefault(toolType, tfObj) {
 
 let markers = [];
 let crossoverPoints = [];
+let closeAbovePoints = [];
 let watchlistData = [];
 let currentVolumeEma3 = [];
 let currentVolumeEma20 = [];
@@ -2679,24 +2685,25 @@ function updateTurnoverBox(index) {
   document.getElementById('turnover-at20').textContent = formatVolume(currentVolumeEma20[index] ? currentVolumeEma20[index].value : null);
 }
 
-// A dot wherever the 10 EMA crosses the 20 EMA (either direction). The two
-// EMAs cross BETWEEN bars i-1 and i, so we keep the four EMA values around the
-// crossing and solve for the exact intersection at RENDER time in PIXEL space
-// (see renderCrossoverOverlay). Doing it in pixel space - not price space - is
-// what makes the dot land on the crossing regardless of the (logarithmic)
-// price scale: the chart draws the EMA lines as straight pixel segments, and a
-// price-space interpolation converted to a coordinate does NOT lie on that
-// segment on a log scale (it was off by ~16px vertically).
-function computeCrossoverPoints(data) {
+// A dot wherever line A crosses line B between consecutive bars. Shared by both
+// event indicators: the EMA 10/20 cross (ema_10 vs ema_20, either direction)
+// and Close-above-20-EMA (close vs ema_20, upward only). We keep the four
+// values around the crossing and solve for the exact intersection at RENDER
+// time in PIXEL space (see renderEventOverlay). Doing it in pixel space - not
+// price space - is what makes the dot land on the crossing regardless of the
+// (logarithmic) price scale: the chart draws the lines as straight pixel
+// segments, and a price-space interpolation converted to a coordinate does NOT
+// lie on that segment on a log scale (it was off by ~16px vertically).
+function computeCrossPoints(data, keyA, keyB, upOnly) {
   const out = [];
   for (let i = 1; i < data.length; i++) {
-    const p10 = data[i - 1].ema_10, p20 = data[i - 1].ema_20;
-    const c10 = data[i].ema_10, c20 = data[i].ema_20;
-    if (p10 == null || p20 == null || c10 == null || c20 == null) continue;
-    const crossedUp = p10 <= p20 && c10 > c20;
-    const crossedDown = p10 >= p20 && c10 < c20;
-    if (!(crossedUp || crossedDown)) continue;
-    out.push({ prevTime: data[i - 1].time, time: data[i].time, p10, p20, c10, c20 });
+    const pa = data[i - 1][keyA], pb = data[i - 1][keyB];
+    const ca = data[i][keyA], cb = data[i][keyB];
+    if (pa == null || pb == null || ca == null || cb == null) continue;
+    const up = pa <= pb && ca > cb;
+    const down = pa >= pb && ca < cb;
+    if (upOnly ? !up : !(up || down)) continue;
+    out.push({ prevTime: data[i - 1].time, time: data[i].time, pa, pb, ca, cb });
   }
   return out;
 }
@@ -2715,41 +2722,41 @@ function crossoverShapeSVG(shape, color) {
     default:          return `<svg ${a}><circle cx="5" cy="5" r="4" fill="${color}"/></svg>`;
   }
 }
-// Positions a styled marker at every crossover point. Cheap (crossovers are
-// sparse); safe to call on every pan/zoom frame like the earnings overlay.
-function renderCrossoverOverlay() {
-  const container = document.getElementById('crossover-overlay');
+// Positions a styled marker at every crossing in `points`, at the exact PIXEL
+// intersection of the two segments (immune to the log scale). Shared by both
+// event overlays; `styleId` selects colour/shape/size from indicatorStyles.
+function renderEventOverlay(containerId, points, visible, styleId) {
+  const container = document.getElementById(containerId);
   if (!container) return;
   container.innerHTML = '';
-  if (!crossoverVisible || !crossoverPoints.length || !barsData.length) return;
-  const st = indicatorStyles.ema_cross;
+  if (!visible || !points.length || !barsData.length) return;
+  const st = indicatorStyles[styleId];
   const px = 6 + (st.size || 1) * 3; // size 1..4 -> 9..18px
   const priceScaleWidth = chart.priceScale('right').width();
   const maxX = chartEl.clientWidth - priceScaleWidth;
   const ts = chart.timeScale();
-  // EMA 10 and EMA 20 share the right price scale, so one series' converter
-  // maps both correctly (verified identical).
+  // Any series on the right price scale converts price->y identically.
   const toY = (price) => emaSeries.ema_10.priceToCoordinate(price);
-  for (const pt of crossoverPoints) {
+  for (const pt of points) {
     const xPrev = ts.timeToCoordinate(pt.prevTime);
     const xCur = ts.timeToCoordinate(pt.time);
-    const yp10 = toY(pt.p10), yc10 = toY(pt.c10), yp20 = toY(pt.p20), yc20 = toY(pt.c20);
+    const ypa = toY(pt.pa), yca = toY(pt.ca), ypb = toY(pt.pb), ycb = toY(pt.cb);
     let x, y;
     if (xPrev !== null && xCur !== null &&
-        yp10 !== null && yc10 !== null && yp20 !== null && yc20 !== null) {
-      // Intersect the two drawn PIXEL segments EMA10:(xPrev,yp10)->(xCur,yc10)
-      // and EMA20:(xPrev,yp20)->(xCur,yc20). s is the fraction along the shared
-      // x-span where their y's meet - the exact on-screen crossing.
-      const denom = (yc10 - yp10) - (yc20 - yp20);
-      let s = denom !== 0 ? (yp20 - yp10) / denom : 0;
+        ypa !== null && yca !== null && ypb !== null && ycb !== null) {
+      // Intersect the two drawn PIXEL segments A:(xPrev,ypa)->(xCur,yca) and
+      // B:(xPrev,ypb)->(xCur,ycb). s is the fraction along the shared x-span
+      // where their y's meet - the exact on-screen crossing.
+      const denom = (yca - ypa) - (ycb - ypb);
+      let s = denom !== 0 ? (ypb - ypa) / denom : 0;
       s = Math.max(0, Math.min(1, s));
       x = xPrev + s * (xCur - xPrev);
-      y = yp10 + s * (yc10 - yp10);
+      y = ypa + s * (yca - ypa);
     } else {
       // Crossing straddles the visible edge: anchor on whichever bar is on
       // screen rather than dropping the dot entirely.
       x = (xCur !== null) ? xCur : xPrev;
-      y = (xCur !== null) ? yc10 : yp10;
+      y = (xCur !== null) ? yca : ypa;
     }
     if (x === null || y === null || x < 0 || x > maxX) continue;
     const el = document.createElement('div');
@@ -2762,22 +2769,32 @@ function renderCrossoverOverlay() {
     container.appendChild(el);
   }
 }
-
-// Renders now AND again after the chart repaints. The dots' Y is a PRICE
-// coordinate, and a visible-range-change fires its subscription synchronously
-// BEFORE the chart repaints its (auto-scaled) vertical axis - so a render in
-// that callback uses the pre-repaint scale and lands ~one frame stale. The
-// double-rAF re-render runs after the repaint has settled the price scale,
-// so the dots snap back onto the crossing. Debounced so a burst of pan/zoom
-// events only schedules one settle pass.
-let crossoverSettleRaf = null;
-function refreshCrossoverOverlay() {
+function renderCrossoverOverlay() {
+  renderEventOverlay('crossover-overlay', crossoverPoints, crossoverVisible, 'ema_cross');
+}
+function renderCloseAboveOverlay() {
+  renderEventOverlay('close-above-overlay', closeAbovePoints, closeAboveVisible, 'close_above_20');
+}
+function renderEventOverlaysNow() {
   renderCrossoverOverlay();
-  if (crossoverSettleRaf !== null) cancelAnimationFrame(crossoverSettleRaf);
-  crossoverSettleRaf = requestAnimationFrame(() => {
-    crossoverSettleRaf = requestAnimationFrame(() => {
-      crossoverSettleRaf = null;
-      renderCrossoverOverlay();
+  renderCloseAboveOverlay();
+}
+
+// Renders both event overlays now AND again after the chart repaints. The dots'
+// Y is a PRICE coordinate, and a visible-range-change fires its subscription
+// synchronously BEFORE the chart repaints its (auto-scaled) vertical axis - so
+// a render in that callback uses the pre-repaint scale and lands ~one frame
+// stale. The double-rAF re-render runs after the repaint has settled the price
+// scale, so the dots snap onto the crossing. Debounced so a burst of pan/zoom
+// events only schedules one settle pass.
+let eventOverlaySettleRaf = null;
+function refreshEventOverlays() {
+  renderEventOverlaysNow();
+  if (eventOverlaySettleRaf !== null) cancelAnimationFrame(eventOverlaySettleRaf);
+  eventOverlaySettleRaf = requestAnimationFrame(() => {
+    eventOverlaySettleRaf = requestAnimationFrame(() => {
+      eventOverlaySettleRaf = null;
+      renderEventOverlaysNow();
     });
   });
 }
@@ -2934,7 +2951,7 @@ const INDICATOR_KIND = {
   m5: 'line', m15: 'line', hourly: 'line', daily: 'line', weekly: 'line', monthly: 'line', quarterly: 'line',
   rel0: 'line', rel1: 'line', rel2: 'line',
   turnover_ema: 'line',
-  turnover: 'volume', earnings: 'earnings', ema_cross: 'cross',
+  turnover: 'volume', earnings: 'earnings', ema_cross: 'cross', close_above_20: 'cross',
 };
 const INDICATOR_LABEL = {
   ema_10: 'EMA 10', ema_20: 'EMA 20', ema_50: 'EMA 50', ema_200: 'EMA 200',
@@ -2942,6 +2959,7 @@ const INDICATOR_LABEL = {
   weekly: 'M10 · Weekly', monthly: 'M10 · Monthly', quarterly: 'M10 · Quarterly',
   rel0: 'Relative M10 · Current TF', rel1: 'Relative M10 · 1 TF above', rel2: 'Relative M10 · 2 TFs above',
   turnover_ema: 'Volume EMA 20', turnover: 'Volume', earnings: 'Earnings', ema_cross: '10/20 EMA cross',
+  close_above_20: 'Close above 20 EMA',
 };
 // Factory defaults. Per the spec: the M10s column and ALL Relative M10s
 // default to black; Relative M10s additionally default to a solid line for
@@ -2956,6 +2974,7 @@ const INDICATOR_STYLE_FACTORY = {
   turnover: { up: '#26a69a', down: '#ef5350', opacity: 0.45 },
   earnings: { color: '#ff9800', size: 14 },
   ema_cross: { color: '#ff9800', shape: 'circle', size: 1 },
+  close_above_20: { color: '#26a69a', shape: 'circle', size: 1 },
 };
 function clone(o) { return JSON.parse(JSON.stringify(o)); }
 function loadIndicatorStyles() {
@@ -3023,8 +3042,13 @@ function applyIndicatorStyle(id) {
     renderEarningsOverlay();
   } else if (kind === 'cross') {
     setIndicatorSwatch(id, st.color);
-    crossoverPoints = computeCrossoverPoints(barsData);
-    renderCrossoverOverlay();
+    if (id === 'ema_cross') {
+      crossoverPoints = computeCrossPoints(barsData, 'ema_10', 'ema_20', false);
+      renderCrossoverOverlay();
+    } else if (id === 'close_above_20') {
+      closeAbovePoints = computeCrossPoints(barsData, 'close', 'ema_20', true);
+      renderCloseAboveOverlay();
+    }
   }
 }
 function applyAllIndicatorStyles() {
@@ -3314,8 +3338,9 @@ function loadTimeframe(tf) {
       updateTurnoverBox(lastRealBarIndex(barsData));
 
       markers = [];
-      crossoverPoints = computeCrossoverPoints(data);
-      renderCrossoverOverlay();
+      crossoverPoints = computeCrossPoints(data, 'ema_10', 'ema_20', false);
+      closeAbovePoints = computeCrossPoints(data, 'close', 'ema_20', true);
+      renderEventOverlaysNow();
       renderEarningsOverlay();
       positionDailyBox();
       refreshMarkers();
@@ -3344,12 +3369,12 @@ function loadTimeframe(tf) {
         chart.timeScale().setVisibleLogicalRange({ from: targetFrom, to: targetTo });
         reassertIndicatorRange(rsiSyncPane, targetFrom, targetTo, data, tf);
         reassertIndicatorRange(macdSyncPane, targetFrom, targetTo, data, tf);
-        // Re-render the crossover dots now the vertical price scale has settled.
+        // Re-render the event dots now the vertical price scale has settled.
         // The first render in loadTimeframe's body runs before autoscale is
         // final, which (unlike the fixed-y earnings badges) would leave the
-        // dots off the EMA crossing until the next pan. Re-asserting the same
-        // range may not fire the range-change subscription, so call directly.
-        renderCrossoverOverlay();
+        // dots off the crossing until the next pan. Re-asserting the same range
+        // may not fire the range-change subscription, so call directly.
+        renderEventOverlaysNow();
       };
       requestAnimationFrame(() => requestAnimationFrame(applyFinalRange));
       setTimeout(() => { applyFinalRange(); suppressSync = false; }, 250);
@@ -3490,6 +3515,9 @@ document.querySelectorAll('#legend .ind-row[data-series]').forEach(row => {
     } else if (key === 'ema_cross') {
       crossoverVisible = checkbox.checked;
       renderCrossoverOverlay();
+    } else if (key === 'close_above_20') {
+      closeAboveVisible = checkbox.checked;
+      renderCloseAboveOverlay();
     } else {
       toggleableSeries[key].applyOptions({ visible: checkbox.checked });
     }
@@ -5845,7 +5873,7 @@ window.addEventListener('resize', () => {
     rsiChart.applyOptions({ width: rsiChartEl.clientWidth, height: rsiChartEl.clientHeight });
   }
   renderEarningsOverlay();
-  refreshCrossoverOverlay();
+  refreshEventOverlays();
   mainPane.refreshOverlay();
   rsiPane.refreshOverlay();
   positionDailyBox();
@@ -5858,7 +5886,7 @@ window.addEventListener('resize', () => {
 // own subscribeVisibleLogicalRangeChange, set up inside rsiPane.attach().
 chart.timeScale().subscribeVisibleLogicalRangeChange(() => {
   renderEarningsOverlay();
-  refreshCrossoverOverlay();
+  refreshEventOverlays();
   mainPane.refreshOverlay();
 });
 

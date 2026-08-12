@@ -38,6 +38,37 @@ not just this once** — treat it as standing practice, not a one-off.
 
 ## 0. NEXT SESSION PRIORITIES (read this first)
 
+**Session update (builds 113 → 115, + first real-market test data).** Two threads.
+
+*Rich Road Candles refinements (builds 114–115):* the classification colour now
+fills the candle **body** (with a **black outline and black wick**), and
+**Neutral** reverts to a normal candle. The indicator moved to the **first row of
+the Indicators column** (above RSI), not a full-width top row. Each of the six
+types (High/Low CB, DC, DC2, Red CB, Neutral) now has its **own on/off checkbox +
+colour picker + palette**; switching a type off drops those candles back to their
+default look. Classification logic is unchanged and still tuning-in-progress —
+notably **DC2 fires on any close above the 10/20 EMA** (~206 of 500 bars on ABNB
+daily; may want a true breakout/cross instead), and the **High CB min move (5%)**
+and any **DC move-range** thresholds are placeholder defaults awaiting the user's
+numbers. Tech Ref §3.9, §9d.
+
+*Real AAPL test data added:* `AAPL` is now in the watchlist and has all 7
+`aapl_{tf}.json` files — the **first real, unmodified market data** in the repo
+(Yahoo Finance query2), added so the user can check the Rich Road classification
+against a known real setup. **It deliberately behaves differently from the other
+11 tickers:**
+- **No future placeholder bars** — the series *ends at the real last trading day*
+  (2026-08-12) and does not extend past "today". Do not assume the trailing-region
+  handling in §4 applies to it.
+- Built to the exact app schema with warm EMAs (`k=2/(n+1)`, rounded 4dp) and
+  turnover EMAs; the EMA recurrence was verified against the `abnb` files.
+- Intraday history is capped by Yahoo's ~60-day limit, so **`aapl_m15` has only
+  891 bars** (vs the ~2446 the synthetic tickers carry); m5/hourly are similarly
+  real-length rather than padded.
+- Watchlist/data-file counts are now **12 stocks / 84 files**.
+- Fetcher was a throwaway Python script (Yahoo query2, spaced requests + backoff);
+  not committed. Re-derive from this note if AAPL ever needs refreshing.
+
 **Session update (builds 103 → 113).** A UI/indicators session. On top of
 everything below:
 - **Unified per-indicator styling popup** — clicking (or right-clicking) an
@@ -234,10 +265,10 @@ that logic gets turned into permanent, automatable code.
 
 | File | Purpose |
 |---|---|
-| `index.html` | The entire app - a single self-contained HTML file. Must keep this exact filename; GitHub Pages requires it. Contains a visible build-number watermark (currently **113**), manually incremented on every handoff, purely so the user can confirm a hard refresh actually picked up new code after repeated caching confusion during development. |
-| `chart_watchlist.json` | Quote summary for the 11 watchlist stocks. |
-| `chart_earnings.json` | Earnings dates (past ~3 years + upcoming) per watchlist stock. |
-| `{ticker}_{timeframe}.json` | Price + indicator data per stock per timeframe (77 files: 11 stocks × 7 timeframes). All 77 extend past "today" with future placeholder bars (flat OHLC in the raw JSON) - see Section 4 for how `index.html` actually renders that trailing region now, which changed significantly this session. |
+| `index.html` | The entire app - a single self-contained HTML file. Must keep this exact filename; GitHub Pages requires it. Contains a visible build-number watermark (currently **115**), manually incremented on every handoff, purely so the user can confirm a hard refresh actually picked up new code after repeated caching confusion during development. |
+| `chart_watchlist.json` | Quote summary for the 12 watchlist stocks. |
+| `chart_earnings.json` | Earnings dates (past ~3 years + upcoming) per watchlist stock. Note: no AAPL entry yet. |
+| `{ticker}_{timeframe}.json` | Price + indicator data per stock per timeframe (84 files: 12 stocks × 7 timeframes). The 11 synthetic tickers extend past "today" with future placeholder bars (flat OHLC in the raw JSON) — see Section 4 for how `index.html` renders that trailing region. **`aapl_*` is the exception:** real Yahoo data ending at the last real trading day, no placeholder bars (see Section 0). |
 | `.github/workflows/chart_export.yml` | Manual-trigger workflow that zips the repo for handoff to an AI assistant. |
 
 **Naming convention:** bias toward "chart" in new filenames. Exception:
@@ -311,16 +342,20 @@ conversion - see `alignTimeToCurrentChart()` and `timeToNumeric()` /
 `extrapolatePrice()` in `index.html`. This session added several more
 conversion helpers alongside these for the sync system - see Section 7.
 
-**Current watchlist (11 stocks):**
+**Current watchlist (12 stocks):**
 `HPQ, COHR, ABNB, RKLB, IREN, NTRA, NEM, TTWO, KGS, CVSA, RMAX` — one
-per sector, chosen for turnover/variety.
+per sector, chosen for turnover/variety — plus **`AAPL`**, added later as
+real-market reference data (see Section 0); it is not part of the original
+one-per-sector set.
 
 ### Future placeholder bars: raw data vs. how `index.html` actually renders them (revised this session)
 
 The raw JSON files still work exactly as documented previously: every
-`{ticker}_{timeframe}.json` file extends past its last real bar with
-flat placeholder rows (OHLC all equal to the last real close, volume/
-turnover zero, EMA columns held at their last real value). Counts per
+synthetic `{ticker}_{timeframe}.json` file (the original 11 tickers)
+extends past its last real bar with flat placeholder rows (OHLC all
+equal to the last real close, volume/turnover zero, EMA columns held at
+their last real value). **`aapl_*` is excluded** — it is real data with
+no trailing placeholder region (Section 0). Counts per
 timeframe (daily +75 trading days, weekly +16 weeks, monthly +6
 months, quarterly +3 quarters, hourly +30 trading days, 15m +12
 trading days, 5m +6 trading days) and 15m's historical-depth extension

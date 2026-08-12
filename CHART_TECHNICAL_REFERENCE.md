@@ -37,13 +37,13 @@ number at time of writing: **113**.
 | File | Kind | Notes |
 |---|---|---|
 | `index.html` | The entire app | Single self-contained file. Filename fixed (GitHub Pages). Visible build-number watermark at `#build-number` (~L887). |
-| `{ticker}_{tf}.json` | Price+indicator series | 77 files = 11 tickers × 7 timeframes. Schema §2. |
+| `{ticker}_{tf}.json` | Price+indicator series | 84 files = 12 tickers × 7 timeframes. Schema §2. `aapl_*` is real Yahoo data with no future placeholder bars (and `aapl_m15` is only 891 bars, Yahoo's ~60-day intraday cap); the other 11 are synthetic and padded past "today". |
 | `chart_watchlist.json` | Watchlist quote summary | Schema §2.3. |
 | `chart_earnings.json` | Earnings dates per ticker | Schema §2.4. |
 | `.github/workflows/chart_export.yml` | CI | Manual-trigger zip of the repo for handoff. |
 
-**Tickers (11):** `HPQ, COHR, ABNB, RKLB, IREN, NTRA, NEM, TTWO, KGS,
-CVSA, RMAX`.
+**Tickers (12):** `HPQ, COHR, ABNB, RKLB, IREN, NTRA, NEM, TTWO, KGS,
+CVSA, RMAX, AAPL` (AAPL = real-market reference data, added later).
 
 **Timeframe keys (7), canonical order low→high** — `TF_ORDER` (~L1210):
 ```

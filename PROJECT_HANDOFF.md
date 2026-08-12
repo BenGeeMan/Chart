@@ -36,7 +36,8 @@ chart project currently calculates client-side (EMA 200, RSI(14),
 Volume EMA 3/20, ideally the multi-timeframe/relative EMA overlays
 too), and (2) work on expanding/improving the chart's watchlist -
 likely connecting it to the full daily scan output rather than the
-current fixed 11 hand-picked stocks. Both are prerequisites the user
+current fixed set of hand-picked stocks (11 one-per-sector, plus `AAPL`
+added later as real-market reference data). Both are prerequisites the user
 wants solid before moving on to the actual end goal of teaching Claude
 their trading-decision logic through the chart tool.
 

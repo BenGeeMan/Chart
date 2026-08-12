@@ -1014,7 +1014,7 @@
             <div class="ind-col-title"><input type="checkbox" checked class="col-master">Events</div>
             <label class="ind-row" data-series="earnings"><input type="checkbox" checked><span class="swatch" style="width:9px;height:9px;background:#ff9800;border-radius:2px;"></span><span class="ind-name">Earnings</span></label>
             <label class="ind-row" data-series="ema_cross"><input type="checkbox" checked><span class="swatch" style="background:#ff9800;width:7px;height:7px;border-radius:50%;"></span><span class="ind-name">10/20 EMA cross</span></label>
-            <label class="ind-row" data-series="close_above_20"><input type="checkbox" checked><span class="swatch" style="background:#26a69a;width:7px;height:7px;border-radius:50%;"></span><span class="ind-name">Close &gt; 20 EMA</span></label>
+            <label class="ind-row" data-series="close_above_20"><input type="checkbox" checked><span class="swatch" style="background:#ff9800;width:7px;height:7px;border-radius:50%;"></span><span class="ind-name">Close &gt; 20 EMA</span></label>
           </div>
           <div class="ind-col">
             <div class="ind-col-title"><input type="checkbox" checked class="col-master">Indicators</div>
@@ -1040,7 +1040,7 @@
       <div id="close-above-overlay"></div>
       <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">111</div>
+      <div id="build-number">112</div>
       <div id="main-no-data">No Data</div>
       <div id="rsi-settings-overlay"></div>
       <div id="macd-settings-overlay"></div>
@@ -2718,6 +2718,7 @@ function crossoverShapeSVG(shape, color) {
     case 'arrowUp':   return `<svg ${a}><polygon points="5,1 1,9 9,9" fill="${color}"/></svg>`;
     case 'arrowDown': return `<svg ${a}><polygon points="1,1 9,1 5,9" fill="${color}"/></svg>`;
     case 'cross':     return `<svg ${a}><path d="M2,2 L8,8 M8,2 L2,8" stroke="${color}" stroke-width="2.2" stroke-linecap="round"/></svg>`;
+    case 'plus':      return `<svg ${a}><path d="M5,1 L5,9 M1,5 L9,5" stroke="${color}" stroke-width="2.2" stroke-linecap="round"/></svg>`;
     case 'circle':
     default:          return `<svg ${a}><circle cx="5" cy="5" r="4" fill="${color}"/></svg>`;
   }
@@ -2974,7 +2975,7 @@ const INDICATOR_STYLE_FACTORY = {
   turnover: { up: '#26a69a', down: '#ef5350', opacity: 0.45 },
   earnings: { color: '#ff9800', size: 14 },
   ema_cross: { color: '#ff9800', shape: 'circle', size: 1 },
-  close_above_20: { color: '#26a69a', shape: 'circle', size: 1 },
+  close_above_20: { color: '#ff9800', shape: 'circle', size: 1 },
 };
 function clone(o) { return JSON.parse(JSON.stringify(o)); }
 function loadIndicatorStyles() {
@@ -3170,7 +3171,7 @@ function openIndicatorStylePanel(id, clientX, clientY) {
     addSelectRow('Size', [[8, '8px'], [10, '10px'], [12, '12px'], [14, '14px'], [16, '16px'], [18, '18px'], [22, '22px'], [26, '26px']], () => st.size, (v) => { st.size = v; live(); }, true);
   } else if (kind === 'cross') {
     addColorControls(() => st.color, (hex) => { st.color = hex; live(); });
-    addSelectRow('Shape', [['circle', 'Circle'], ['square', 'Square'], ['cross', 'Cross'], ['arrowUp', 'Arrow up'], ['arrowDown', 'Arrow down']], () => st.shape, (v) => { st.shape = v; live(); });
+    addSelectRow('Shape', [['circle', 'Circle'], ['square', 'Square'], ['cross', 'Cross (X)'], ['plus', 'Cross (+)'], ['arrowUp', 'Arrow up'], ['arrowDown', 'Arrow down']], () => st.shape, (v) => { st.shape = v; live(); });
     addSelectRow('Size', [[1, 'Small'], [2, 'Medium'], [3, 'Large'], [4, 'X-large']], () => st.size, (v) => { st.size = v; live(); }, true);
   }
 

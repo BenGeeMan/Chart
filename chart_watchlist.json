@@ -1,5 +1,12 @@
 [
   {
+    "ticker": "AAPL",
+    "name": "Apple Inc.",
+    "sector": "Technology",
+    "last": 302.25,
+    "change_pct": -0.87
+  },
+  {
     "ticker": "HPQ",
     "name": "HP Inc.",
     "sector": "Technology",

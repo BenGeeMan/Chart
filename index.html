@@ -266,21 +266,6 @@
     pointer-events: none;
     user-select: none;
   }
-  #rsi-settings-btn {
-    position: absolute;
-    top: 1px;
-    left: 312px;
-    z-index: 8;
-    background: #ffffff;
-    border: 1px solid var(--panel-border);
-    border-radius: 3px;
-    font-size: 11px;
-    color: var(--text-dim);
-    cursor: pointer;
-    padding: 2px 6px;
-    line-height: 1.4;
-  }
-  #rsi-settings-btn:hover { color: var(--text); background: rgba(0,0,0,0.04); }
   #rsi-settings-overlay {
     position: absolute;
     inset: 0;
@@ -295,21 +280,6 @@
     pointer-events: none;
     overflow: visible;
   }
-  #macd-settings-btn {
-    position: absolute;
-    top: 1px;
-    left: 372px;
-    z-index: 8;
-    background: #ffffff;
-    border: 1px solid var(--panel-border);
-    border-radius: 3px;
-    font-size: 11px;
-    color: var(--text-dim);
-    cursor: pointer;
-    padding: 2px 6px;
-    line-height: 1.4;
-  }
-  #macd-settings-btn:hover { color: var(--text); background: rgba(0,0,0,0.04); }
   #rsi-tf-buttons {
     position: absolute;
     top: 1px;
@@ -1031,8 +1001,8 @@
           </div>
           <div class="ind-col">
             <div class="ind-col-title"><input type="checkbox" checked class="col-master">Indicators</div>
-            <label class="ind-row" data-series="rsi"><input type="checkbox" checked><span class="swatch" style="background:#131722"></span>RSI (14)</label>
-            <label class="ind-row" data-series="macd"><input type="checkbox" checked><span class="swatch" style="background:#2962ff"></span>MACD (12,26,9)</label>
+            <label class="ind-row" data-series="rsi"><input type="checkbox" checked><span class="swatch" style="background:#131722"></span><span class="ind-name">RSI (14)</span></label>
+            <label class="ind-row" data-series="macd"><input type="checkbox" checked><span class="swatch" style="background:#2962ff"></span><span class="ind-name">MACD (12,26,9)</span></label>
             <label class="ind-row" data-series="turnoverbox"><input type="checkbox" checked>Turnover</label>
           </div>
         </div>
@@ -1051,7 +1021,7 @@
       <div id="earnings-overlay"></div>
       <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">106</div>
+      <div id="build-number">107</div>
       <div id="main-no-data">No Data</div>
       <div id="rsi-settings-overlay"></div>
       <div id="macd-settings-overlay"></div>
@@ -1059,7 +1029,6 @@
     <div id="rsi-chart-container">
       <div id="rsi-resize-handle" class="pane-resize-handle" title="Drag to resize"></div>
       <div id="rsi-label">RSI (14)</div>
-      <button id="rsi-settings-btn" title="RSI settings">⚙</button>
       <div id="rsi-tf-buttons">
         <button class="rsi-tf-btn" data-tf="chart">Chart</button>
         <button class="rsi-tf-btn" data-tf="m5">5m</button>
@@ -1077,7 +1046,6 @@
     <div id="macd-chart-container">
       <div id="macd-resize-handle" class="pane-resize-handle" title="Drag to resize"></div>
       <div id="macd-label">MACD (12,26,9)</div>
-      <button id="macd-settings-btn" title="MACD settings">⚙</button>
       <div id="macd-tf-buttons">
         <button class="macd-tf-btn" data-tf="chart">Chart</button>
         <button class="macd-tf-btn" data-tf="m5">5m</button>
@@ -3428,9 +3396,10 @@ document.querySelectorAll('#legend .ind-row[data-series]').forEach(row => {
 });
 
 // Clicking an indicator's NAME opens its style popup. preventDefault stops
-// the wrapping <label> from also toggling the visibility checkbox; only rows
-// with a styleable indicator carry an .ind-name span (RSI/MACD/Turnover
-// don't, so they're untouched).
+// the wrapping <label> from also toggling the visibility checkbox. This loop
+// only wires rows whose id is a styleable indicator (in INDICATOR_KIND);
+// RSI/MACD also carry an .ind-name but are skipped here and wired separately
+// below to their own settings panels, and Turnover has no .ind-name.
 document.querySelectorAll('#indicators-panel .ind-name').forEach(nameEl => {
   const row = nameEl.closest('.ind-row');
   if (!row) return;
@@ -3449,6 +3418,23 @@ document.querySelectorAll('#indicators-panel .ind-name').forEach(nameEl => {
   nameEl.addEventListener('click', open);
   row.addEventListener('contextmenu', open);
 });
+
+// RSI and MACD keep their OWN dedicated settings panels (not the generic
+// style popup), but are now opened the same way as everything else - by
+// clicking their name in the Indicators dropdown (left-click the name, or
+// right-click anywhere on the row). This replaces the old ⚙ buttons, which
+// have been removed. The checkbox still toggles the pane on/off.
+function wirePanelName(seriesId, openPanel) {
+  const row = document.querySelector(`.ind-row[data-series="${seriesId}"]`);
+  if (!row) return;
+  const nameEl = row.querySelector('.ind-name');
+  const open = (e) => { e.preventDefault(); e.stopPropagation(); openPanel(); };
+  if (nameEl) nameEl.addEventListener('click', open);
+  row.addEventListener('contextmenu', open);
+}
+wirePanelName('rsi', () => { rsiSettingsPanelOpen = true; renderRsiSettingsPanel(); });
+wirePanelName('macd', () => { macdSettingsPanelOpen = true; renderMacdSettingsPanel(); });
+
 // Apply saved (or factory) styles now that the menu + series exist.
 applyAllIndicatorStyles();
 
@@ -3801,11 +3787,9 @@ function renderRsiSettingsPanel() {
   container.appendChild(panel);
 }
 
-document.getElementById('rsi-settings-btn').addEventListener('click', (e) => {
-  e.stopPropagation();
-  rsiSettingsPanelOpen = !rsiSettingsPanelOpen;
-  renderRsiSettingsPanel();
-});
+// The RSI settings panel is opened from the "RSI (14)" name in the
+// Indicators dropdown (see the name-wiring block above) - the old ⚙ button
+// was removed. Any click outside the panel still closes it.
 document.addEventListener('click', () => {
   if (rsiSettingsPanelOpen) { rsiSettingsPanelOpen = false; renderRsiSettingsPanel(); }
 });
@@ -3957,11 +3941,9 @@ function renderMacdSettingsPanel() {
 
   container.appendChild(panel);
 }
-document.getElementById('macd-settings-btn').addEventListener('click', (e) => {
-  e.stopPropagation();
-  macdSettingsPanelOpen = !macdSettingsPanelOpen;
-  renderMacdSettingsPanel();
-});
+// Opened from the "MACD (12,26,9)" name in the Indicators dropdown (see the
+// name-wiring block above) - the old ⚙ button was removed. Any click outside
+// the panel still closes it.
 document.addEventListener('click', () => {
   if (macdSettingsPanelOpen) { macdSettingsPanelOpen = false; renderMacdSettingsPanel(); }
 });

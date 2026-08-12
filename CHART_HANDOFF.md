@@ -38,6 +38,37 @@ not just this once** — treat it as standing practice, not a one-off.
 
 ## 0. NEXT SESSION PRIORITIES (read this first)
 
+**TOP PRIORITY next session — Rich Road classification is still wrong.** The
+settings menu is now fully working, but when the user checked the actual candle
+**classification** against the real AAPL data they confirmed *"it's not right."*
+The classifier logic/thresholds need the user's real rules — do **not** re-guess;
+ask for the concrete numbers. Main suspects (all live-editable in the panel,
+current values are placeholders): **DC2** fires on *any* close above the 10/20 EMA
+(~206/500 bars on ABNB daily; likely should be a real breakout/cross, or off);
+**High CB min move** (5%); **DC move-range** (undefined). Classifier is Tech Ref
+§9d; params in `RICHROAD_FACTORY` / `richRoadCandles_v1`.
+
+**Session update (builds 115 → 118).** Rich Road Candles settings menu made
+discoverable/usable. The panel already had every control (per-type on/off +
+colour + palette, thresholds, Set/Restore Default) but was effectively invisible.
+Three layered fixes (each its own build), all now on `main`:
+- **116** — right-click *and* left-click on the indicator name now open the menu
+  **at the cursor** (like the other indicators' style popups), not dead-centre.
+  `wirePanelName` passes the event through; `renderRichRoadPanel(clientX, clientY)`
+  positions and remembers the spot across re-renders.
+- **117** — the panel now attaches to `<body>`, not `#richroad-overlay` (which
+  sits inside the positioned `main-chart-area`, so an absolutely-positioned child
+  was measured from the chart origin and landed off-screen on a narrow window).
+  Also clamps fully on-screen accounting for its `translateX(-50%)` centring.
+- **118** — the panel sets `z-index: 1000`; without it, it rendered **behind** the
+  still-open Indicators dropdown (z-index 5) — present but covered, which read as
+  "right-click, no menu". This was the fault the user was actually hitting.
+- Convention going forward: indicator settings menus open at the cursor via
+  left/right-click on the name (no gear icon), attach to `<body>`, and set
+  z-index 1000. Debug "not showing" with `document.elementFromPoint`, not just the
+  rect. **NB the preview pane renders `file://` as a non-interactive snapshot** —
+  test live via the dev server / deployed Pages, not the `file://` tab.
+
 **Session update (builds 113 → 115, + first real-market test data).** Two threads.
 
 *Rich Road Candles refinements (builds 114–115):* the classification colour now
@@ -265,7 +296,7 @@ that logic gets turned into permanent, automatable code.
 
 | File | Purpose |
 |---|---|
-| `index.html` | The entire app - a single self-contained HTML file. Must keep this exact filename; GitHub Pages requires it. Contains a visible build-number watermark (currently **115**), manually incremented on every handoff, purely so the user can confirm a hard refresh actually picked up new code after repeated caching confusion during development. |
+| `index.html` | The entire app - a single self-contained HTML file. Must keep this exact filename; GitHub Pages requires it. Contains a visible build-number watermark (currently **118**), manually incremented on every handoff, purely so the user can confirm a hard refresh actually picked up new code after repeated caching confusion during development. |
 | `chart_watchlist.json` | Quote summary for the 12 watchlist stocks. |
 | `chart_earnings.json` | Earnings dates (past ~3 years + upcoming) per watchlist stock. Note: no AAPL entry yet. |
 | `{ticker}_{timeframe}.json` | Price + indicator data per stock per timeframe (84 files: 12 stocks × 7 timeframes). The 11 synthetic tickers extend past "today" with future placeholder bars (flat OHLC in the raw JSON) — see Section 4 for how `index.html` renders that trailing region. **`aapl_*` is the exception:** real Yahoo data ending at the last real trading day, no placeholder bars (see Section 0). |

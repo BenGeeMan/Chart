@@ -302,6 +302,14 @@ persists on Set as Default (like `rsiEnabled`). `enabledTypes` switches each
 candle type on/off individually (an off type is left at default appearance).
 See §9d for the classifier and per-candle recolouring.
 
+**Settings panel (build 118).** `renderRichRoadPanel(clientX, clientY)` opens on
+left- or right-click of the indicator name via `wirePanelName`, positioned **at
+the cursor** like the style popups. The panel is appended to `<body>` (NOT
+`#richroad-overlay`, which is inside the positioned `main-chart-area` and would
+anchor it off-screen) with `z-index: 1000` (else it hides behind the Indicators
+dropdown), and clamped fully on-screen. Position is remembered in
+`richRoadPanelPos` across re-renders. `#richroad-overlay` is now unused.
+
 ---
 
 ## 4. The cross-pane sync model (main ↔ indicator panes)

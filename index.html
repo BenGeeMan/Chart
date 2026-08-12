@@ -448,17 +448,7 @@
     padding: 10px 14px;
     gap: 18px;
   }
-  #legend.expanded #indicators-panel { display: flex; flex-wrap: wrap; }
-  /* Rich Road Candles toggle sits on its own full-width row at the TOP of the
-     panel (flex-wrap lets it take a whole row above the columns). */
-  #richroad-toprow {
-    flex-basis: 100%;
-    width: 100%;
-    padding-bottom: 8px;
-    margin-bottom: 2px;
-    border-bottom: 1px solid var(--panel-border);
-  }
-  .richroad-hint { color: var(--text-dim); font-size: 10px; margin-left: 6px; }
+  #legend.expanded #indicators-panel { display: flex; }
   .ind-col {
     display: flex;
     flex-direction: column;
@@ -992,9 +982,6 @@
         <div class="headline" id="legend-headline">HPQ · Daily · NYSE</div>
         <button id="indicators-toggle" type="button">Indicators <span id="indicators-chevron">▾</span></button>
         <div id="indicators-panel">
-          <div id="richroad-toprow">
-            <label class="ind-row" data-series="richroad"><input type="checkbox" checked><span class="ind-name" style="font-weight:600;">Rich Road Candles</span><span class="richroad-hint">— click name for colours &amp; thresholds</span></label>
-          </div>
           <div class="ind-col">
             <div class="ind-col-title"><input type="checkbox" checked class="col-master">Standard EMAs</div>
             <label class="ind-row" data-series="ema_10"><input type="checkbox" checked><span class="swatch" style="background:#000000"></span><span class="ind-name">EMA 10</span></label>
@@ -1031,6 +1018,7 @@
           </div>
           <div class="ind-col">
             <div class="ind-col-title"><input type="checkbox" checked class="col-master">Indicators</div>
+            <label class="ind-row" data-series="richroad"><input type="checkbox" checked><span class="swatch" style="background:linear-gradient(90deg,#2e1a9c,#3d5afe,#43a047,#12a186,#f2334d)"></span><span class="ind-name">Rich Road Candles</span></label>
             <label class="ind-row" data-series="rsi"><input type="checkbox" checked><span class="swatch" style="background:#131722"></span><span class="ind-name">RSI (14)</span></label>
             <label class="ind-row" data-series="macd"><input type="checkbox" checked><span class="swatch" style="background:#2962ff"></span><span class="ind-name">MACD (12,26,9)</span></label>
             <label class="ind-row" data-series="turnoverbox"><input type="checkbox" checked>Turnover</label>
@@ -1053,7 +1041,7 @@
       <div id="close-above-overlay"></div>
       <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">114</div>
+      <div id="build-number">115</div>
       <div id="main-no-data">No Data</div>
       <div id="rsi-settings-overlay"></div>
       <div id="macd-settings-overlay"></div>
@@ -3237,6 +3225,9 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeIndic
 const RICHROAD_KEY = 'richRoadCandles_v1';
 const RICHROAD_FACTORY = {
   enabled: true,
+  // Per-type on/off - a candle whose matched type is off is left at its
+  // default appearance (not recoloured).
+  enabledTypes: { highCB: true, lowCB: true, dc: true, dc2: true, redCB: true, neutralCB: true },
   colors: {
     highCB:    '#2e1a9c', // navy / indigo - strong bullish
     lowCB:     '#3d5afe', // blue - moderate bullish
@@ -3261,6 +3252,7 @@ function loadRichRoad() {
   try { saved = JSON.parse(localStorage.getItem(RICHROAD_KEY) || '{}') || {}; } catch (e) { saved = {}; }
   return {
     enabled: saved.enabled != null ? saved.enabled : RICHROAD_FACTORY.enabled,
+    enabledTypes: Object.assign({}, RICHROAD_FACTORY.enabledTypes, saved.enabledTypes || {}),
     colors: Object.assign({}, RICHROAD_FACTORY.colors, saved.colors || {}),
     params: Object.assign({}, RICHROAD_FACTORY.params, saved.params || {}),
   };
@@ -3305,11 +3297,10 @@ function paintCandles() {
     if (i > realIdx) return { time: d.time }; // future placeholder -> whitespace
     if (!richRoad.enabled) return d;
     const type = classifyCandle(d);
-    // Candles that don't qualify for a signal type keep their DEFAULT
-    // appearance (never recoloured) - per user direction.
-    if (!type || type === 'neutralCB') return d;
-    const c = richRoad.colors[type];
-    return Object.assign({}, d, { color: c, borderColor: c, wickColor: c });
+    // Skip if unclassified OR that type is switched off in the settings panel.
+    if (!type || !richRoad.enabledTypes[type]) return d;
+    // Colour fills the candle BODY; the outline (border) and wick stay black.
+    return Object.assign({}, d, { color: richRoad.colors[type], borderColor: '#000000', wickColor: '#000000' });
   });
   series.setData(data);
 }
@@ -3345,23 +3336,32 @@ function renderRichRoadPanel() {
     const l = document.createElement('label'); l.textContent = labelText;
     row.appendChild(l); row.appendChild(inputEl); (section || body).appendChild(row);
   }
-  function addColorRow(labelText, get, set) {
+  // A candle type: an on/off checkbox (enabledTypes[key]) + colour picker + the
+  // 12-swatch palette. Switching a type off leaves its candles at default.
+  function addTypeRow(key, labelText) {
     const wrap = document.createElement('div');
     wrap.style.display = 'flex'; wrap.style.flexDirection = 'column'; wrap.style.gap = '4px'; wrap.style.flex = '1';
-    const ci = document.createElement('input'); ci.type = 'color'; ci.value = get();
+    const top = document.createElement('div');
+    top.style.display = 'flex'; top.style.alignItems = 'center'; top.style.gap = '6px';
+    const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = richRoad.enabledTypes[key];
+    const ci = document.createElement('input'); ci.type = 'color'; ci.value = richRoad.colors[key]; ci.disabled = !richRoad.enabledTypes[key];
     let sync;
-    ci.addEventListener('input', () => { set(ci.value); sync(); paintCandles(); });
+    cb.addEventListener('mousedown', (e) => e.stopPropagation());
+    cb.addEventListener('change', () => { richRoad.enabledTypes[key] = cb.checked; ci.disabled = !cb.checked; paintCandles(); });
+    ci.addEventListener('input', () => { richRoad.colors[key] = ci.value; sync(); paintCandles(); });
+    ci.style.marginLeft = 'auto';
+    top.appendChild(cb); top.appendChild(ci);
     const grid = document.createElement('div'); grid.className = 'color-swatch-grid';
     const els = [];
-    sync = () => { const cur = (get() || '').toLowerCase(); els.forEach(e => e.classList.toggle('selected', e.dataset.color.toLowerCase() === cur)); };
+    sync = () => { const cur = (richRoad.colors[key] || '').toLowerCase(); els.forEach(e => e.classList.toggle('selected', e.dataset.color.toLowerCase() === cur)); };
     IND_PALETTE.forEach((hex) => {
       const sw = document.createElement('button'); sw.className = 'color-swatch';
       sw.style.background = hex; sw.dataset.color = hex; sw.title = hex;
       sw.addEventListener('mousedown', (e) => e.stopPropagation());
-      sw.addEventListener('click', (e) => { e.stopPropagation(); ci.value = hex; set(hex); sync(); paintCandles(); });
+      sw.addEventListener('click', (e) => { e.stopPropagation(); if (!richRoad.enabledTypes[key]) return; ci.value = hex; richRoad.colors[key] = hex; sync(); paintCandles(); });
       els.push(sw); grid.appendChild(sw);
     });
-    wrap.appendChild(ci); wrap.appendChild(grid);
+    wrap.appendChild(top); wrap.appendChild(grid);
     addRow(labelText, wrap); sync();
   }
   function addNumRow(labelText, get, set, step, min, max) {
@@ -3373,14 +3373,13 @@ function renderRichRoadPanel() {
     addRow(labelText, inp);
   }
 
-  addSection('Candle colours');
-  addColorRow('High CB', () => richRoad.colors.highCB, (v) => richRoad.colors.highCB = v);
-  addColorRow('Low CB', () => richRoad.colors.lowCB, (v) => richRoad.colors.lowCB = v);
-  addColorRow('DC', () => richRoad.colors.dc, (v) => richRoad.colors.dc = v);
-  addColorRow('DC2 (breakout)', () => richRoad.colors.dc2, (v) => richRoad.colors.dc2 = v);
-  addColorRow('Red CB', () => richRoad.colors.redCB, (v) => richRoad.colors.redCB = v);
-  // Neutral candles are left at their default appearance (not recoloured), so
-  // there's deliberately no Neutral colour control.
+  addSection('Candle types — on/off + colour');
+  addTypeRow('highCB', 'High CB');
+  addTypeRow('lowCB', 'Low CB');
+  addTypeRow('dc', 'DC');
+  addTypeRow('dc2', 'DC2 (breakout)');
+  addTypeRow('redCB', 'Red CB');
+  addTypeRow('neutralCB', 'Neutral');
 
   addSection('High CB thresholds');
   addNumRow('Auto-qualify move %', () => richRoad.params.highAutoMove, (v) => richRoad.params.highAutoMove = v, '0.1');

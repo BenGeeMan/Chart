@@ -292,13 +292,15 @@ creation-time colours (§8.1) at load via `applyAllIndicatorStyles()`.
 Const `RICHROAD_KEY`; factory `RICHROAD_FACTORY`. Shape:
 ```js
 { enabled: true,
-  colors: { highCB, lowCB, dc, dc2, redCB, neutralCB },   // 6 hex
+  enabledTypes: { highCB, lowCB, dc, dc2, redCB, neutralCB },  // per-type on/off
+  colors:       { highCB, lowCB, dc, dc2, redCB, neutralCB },  // 6 hex
   params: { highAutoMove:9.5, highMinMove:5, highBodyRatio:0.6, highWickTol:5,
             lowMinMove:3, dcBodyRatio:0.6, dcWickTol:5, redMove:4 } }
 ```
 Section-merged load (`loadRichRoad`). `enabled` is a runtime toggle that only
-persists on Set as Default (like `rsiEnabled`). See §11 for the classifier and
-per-candle recolouring.
+persists on Set as Default (like `rsiEnabled`). `enabledTypes` switches each
+candle type on/off individually (an off type is left at default appearance).
+See §9d for the classifier and per-candle recolouring.
 
 ---
 
@@ -780,12 +782,14 @@ possible (adds **cross `X`** and **plus `+`**). One shared engine:
 
 ## 9d. Rich Road Candles (build 113)
 
-Recolours each **real** candle by classification, via per-bar `color`/
-`borderColor`/`wickColor` fields on the candlestick series. `paintCandles()`
-rebuilds the candle data (future bars → whitespace, §5) and is called from
-`loadTimeframe` and on any live change; when `richRoad.enabled` is false it
-returns the raw bars (default colours). `classifyCandle(bar)` returns one of six
-colour keys using the adjustable `richRoad.params` (§3.9):
+Recolours each **real** candle by classification. `paintCandles()` rebuilds the
+candle data (future bars → whitespace, §5) and is called from `loadTimeframe`
+and on any live change. A classified bar gets **`color` = the type colour (body
+fill), `borderColor` = black, `wickColor` = black** — coloured body, black
+outline + wick. A bar is left at its default appearance when Rich Road is off,
+the bar is unclassified, or its matched type is switched off in `enabledTypes`
+(§3.9). `classifyCandle(bar)` returns one of six colour keys using the
+adjustable `richRoad.params`:
 - **move** = body move `(close-open)/open*100`; **body ratio** =
   `|close-open|/(high-low)`; **wick tol** = `(open-low)/low*100`.
 - Precedence (first match): **Red CB** (bearish, down ≥ `redMove`) → **High CB**
@@ -796,11 +800,13 @@ colour keys using the adjustable `richRoad.params` (§3.9):
 - These map underspecified source criteria to concrete, fully-adjustable
   defaults — treat the thresholds as tunable, not canonical.
 
-**UI:** a full-width row at the TOP of `#indicators-panel` (`#richroad-toprow`,
-via `flex-wrap`), checkbox = on/off, name opens `renderRichRoadPanel()` — a
-2-column panel (§9b) with a colour picker + 12-swatch palette per colour and a
-number input per threshold, Set/Restore Default. **Note:** Neutral default is
-white `#ffffff`, so neutral candles blend into the white background by design.
+**UI:** the first row of the **Indicators column** (`data-series="richroad"`);
+checkbox = whole-indicator on/off, name opens `renderRichRoadPanel()` — a
+2-column panel (§9b) whose "Candle types" section gives each of the six types an
+**on/off checkbox + colour picker + 12-swatch palette**, plus a number input per
+threshold, Set/Restore Default (persisted `richRoadCandles_v1`). The classifier
+precedence still assigns Neutral, but a Neutral (or any off) type just means the
+candle keeps its default appearance.
 
 ---
 

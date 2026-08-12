@@ -1053,7 +1053,7 @@
       <div id="close-above-overlay"></div>
       <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">113</div>
+      <div id="build-number">114</div>
       <div id="main-no-data">No Data</div>
       <div id="rsi-settings-overlay"></div>
       <div id="macd-settings-overlay"></div>
@@ -3305,7 +3305,9 @@ function paintCandles() {
     if (i > realIdx) return { time: d.time }; // future placeholder -> whitespace
     if (!richRoad.enabled) return d;
     const type = classifyCandle(d);
-    if (!type) return d;
+    // Candles that don't qualify for a signal type keep their DEFAULT
+    // appearance (never recoloured) - per user direction.
+    if (!type || type === 'neutralCB') return d;
     const c = richRoad.colors[type];
     return Object.assign({}, d, { color: c, borderColor: c, wickColor: c });
   });
@@ -3377,7 +3379,8 @@ function renderRichRoadPanel() {
   addColorRow('DC', () => richRoad.colors.dc, (v) => richRoad.colors.dc = v);
   addColorRow('DC2 (breakout)', () => richRoad.colors.dc2, (v) => richRoad.colors.dc2 = v);
   addColorRow('Red CB', () => richRoad.colors.redCB, (v) => richRoad.colors.redCB = v);
-  addColorRow('Neutral CB', () => richRoad.colors.neutralCB, (v) => richRoad.colors.neutralCB = v);
+  // Neutral candles are left at their default appearance (not recoloured), so
+  // there's deliberately no Neutral colour control.
 
   addSection('High CB thresholds');
   addNumRow('Auto-qualify move %', () => richRoad.params.highAutoMove, (v) => richRoad.params.highAutoMove = v, '0.1');

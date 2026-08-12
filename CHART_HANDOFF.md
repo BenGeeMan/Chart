@@ -38,6 +38,42 @@ not just this once** — treat it as standing practice, not a one-off.
 
 ## 0. NEXT SESSION PRIORITIES (read this first)
 
+**Session update (builds 103 → 113).** A UI/indicators session. On top of
+everything below:
+- **Unified per-indicator styling popup** — clicking (or right-clicking) an
+  indicator's *name* in the dropdown opens a style popup (checkbox still
+  toggles on/off). Colour via a 12-swatch palette + custom picker, **separate
+  transparency**, thickness, line style; adapts per indicator *kind*
+  (line/volume/earnings/marker). One store `indicatorStyles_v1`, Set/Restore
+  Default like RSI. Volume colours migrated out of `volumeColors_v1` into it.
+  M10s + Relative M10s now default black (rel solid/dashed/dotted). Tech Ref
+  §3.8, §9c.
+- **RSI/MACD opened from the dropdown names now; the ⚙ gear buttons were
+  removed** (their panels are unchanged — just a different entry point). Tech
+  Ref §9c.
+- **Event markers are now custom HTML/SVG overlays**, not native chart markers
+  — so shapes beyond the library's four exist (**cross `X`**, **plus `+`**).
+  Added a new **"Close above 20 EMA"** event indicator (close crossing up
+  through the 20 EMA) alongside the 10/20 EMA cross; one shared engine
+  (`computeCrossPoints` + `renderEventOverlay`). Two placement bugs fixed and
+  worth remembering (both in Tech Ref §9c): dots must be placed at the
+  **pixel-space** intersection (the log price scale makes a price-space value
+  sit ~16px off the drawn line), and re-rendered **after** the chart repaints
+  its auto-scaled axis (a debounced double-rAF), or they lag a frame stale.
+- **Rich Road Candles** (build 113) — recolours each real candle by a six-type
+  classifier (High/Low CB, DC, DC2 breakout, Red CB, Neutral). Sits at the top
+  of the Indicators dropdown; every threshold AND every colour is
+  user-adjustable in its settings panel. `richRoadCandles_v1`. The source
+  criteria were partly qualitative — the concrete thresholds are documented,
+  adjustable defaults, not canonical. Tech Ref §3.9, §9d.
+
+**Deploy gotcha learned this session:** pushing many commits in quick
+succession made GitHub Pages' concurrency cancel the real build job, wedging a
+deploy in "building" forever (live site stuck a build behind, an intermediate
+run showing a "skipped"/"failed" deploy). Fix: request a fresh build with
+`gh api -X POST repos/BenGeeMan/Chart/pages/builds`. Mitigation adopted:
+**batch related changes into one push** rather than one-per-build.
+
 **Session update (builds 82 → 103).** Large session. Later builds
 (95 → 103) added, on top of everything below:
 - **MACD drawing tools** on the shared toolbar (`macdPane` via
@@ -198,7 +234,7 @@ that logic gets turned into permanent, automatable code.
 
 | File | Purpose |
 |---|---|
-| `index.html` | The entire app - a single self-contained HTML file. Must keep this exact filename; GitHub Pages requires it. Contains a visible build-number watermark (currently **82**), manually incremented on every handoff, purely so the user can confirm a hard refresh actually picked up new code after repeated caching confusion during development. |
+| `index.html` | The entire app - a single self-contained HTML file. Must keep this exact filename; GitHub Pages requires it. Contains a visible build-number watermark (currently **113**), manually incremented on every handoff, purely so the user can confirm a hard refresh actually picked up new code after repeated caching confusion during development. |
 | `chart_watchlist.json` | Quote summary for the 11 watchlist stocks. |
 | `chart_earnings.json` | Earnings dates (past ~3 years + upcoming) per watchlist stock. |
 | `{ticker}_{timeframe}.json` | Price + indicator data per stock per timeframe (77 files: 11 stocks × 7 timeframes). All 77 extend past "today" with future placeholder bars (flat OHLC in the raw JSON) - see Section 4 for how `index.html` actually renders that trailing region now, which changed significantly this session. |

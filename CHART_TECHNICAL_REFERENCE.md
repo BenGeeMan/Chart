@@ -28,7 +28,7 @@ mandates. Line numbers below are written as *approximate anchors*
 is the durable locator, not the number.
 
 All anchors below refer to `index.html` unless stated otherwise. Build
-number at time of writing: **103**.
+number at time of writing: **113**.
 
 ---
 
@@ -146,7 +146,10 @@ try/catch — private browsing / disabled storage falls back to
 in-memory, feature still works for the session). All are keyed by
 constants, never bare strings: `rsiSettings_v1`, `rsiLayout_v1`,
 `chartToolDefaults_v1`, `macdSettings_v1`, `macdLayout_v1`,
-`volumeColors_v1`, `turnoverStyle_v1`.
+`turnoverStyle_v1`, `indicatorStyles_v1` (§3.8), `richRoadCandles_v1`
+(§3.9). **`volumeColors_v1` is legacy** — volume colours moved into
+`indicatorStyles_v1` (build 104); the old key is read once and migrated
+(§3.6, §3.8).
 
 ### 3.1 `rsiSettings_v1` — RSI indicator styling
 
@@ -234,14 +237,16 @@ independently. Any future pane reuses `paneOrderValue`.
 line via the shared `.pane-resize-handle` class (`::after`) so it's
 discoverable. Future panes get it by adding that class to their handle.
 
-### 3.6 `volumeColors_v1` — volume bar colours
+### 3.6 `volumeColors_v1` — volume bar colours (LEGACY, migrated)
 
-`{ up, down }` hex colours for the volume histogram, applied at 45% opacity
-(`hexToRgba`). Default `{ up: '#26a69a', down: '#ef5350' }`. Up/down colour
-pickers live under the **Volume** row in the Indicators panel; a change
-re-tints live via `paintVolume()` (recolours from `barsData`, no reload —
-same pattern as `paintMacdHist`). `loadTimeframe` colours bars through the
-same `volumeBarColor()`.
+**Superseded build 104.** Volume up/down colours + transparency now live in
+`indicatorStyles_v1` under the `turnover` key (§3.8); the inline colour
+pickers were removed and volume is styled via the same name-click popup as
+every other line indicator. `loadIndicatorStyles()` reads the old
+`volumeColors_v1` once and folds `{ up, down }` into `indicatorStyles.turnover`
+if no new value exists (one-time migration). `volumeBarColor()` /
+`paintVolume()` now read `indicatorStyles.turnover` (`{ up, down, opacity }`,
+default `{ '#26a69a', '#ef5350', 0.45 }`).
 
 ### 3.7 `turnoverStyle_v1` — turnover info-box styling
 
@@ -254,6 +259,46 @@ show/hide **Turnover** toggle in the Indicators column (`data-series=
 "turnoverbox"`); the colour/transparency controls open in a small draggable
 popup (`#turnover-settings`) on **right-clicking the Turnover menu row**
 (build 103 — was the box itself in 102).
+
+### 3.8 `indicatorStyles_v1` — unified per-indicator styling (build 104)
+
+One store for every styleable line/marker indicator EXCEPT RSI/MACD (own
+panels) and the turnover box (§3.7). Const `INDICATOR_STYLE_KEY`; factory
+`INDICATOR_STYLE_FACTORY` keyed by indicator id. Per-key deep-merge load
+(`loadIndicatorStyles`) over factory, so partial saved objects still fill in.
+Live edits mutate `indicatorStyles` and apply immediately; **"Set as Default"**
+persists the whole object; **"Restore Default"** re-reads saved-or-factory for
+that id (two-step, as §3.3). See §11 for the popup UI and the four style
+*kinds*. Keys + factory shapes:
+```js
+// kind 'line' — EMAs, M10s, Relative M10s, Volume EMA 20:
+{ color, opacity, lineWidth, lineStyle }   // applied via colorWithOpacity + LINE_STYLE_MAP
+// kind 'volume' — the histogram (id 'turnover'):
+{ up, down, opacity }
+// kind 'earnings':
+{ color, size }
+// kind 'cross' — 'ema_cross' and 'close_above_20':
+{ color, shape, size }   // shape ∈ circle|square|cross|plus|arrowUp|arrowDown
+```
+**Factory defaults of note:** the M10s column (`m5…quarterly`) and all
+Relative M10s default to **black**; Relative M10s also default `solid`
+(rel0) / `dashed` (rel1) / `dotted` (rel2). Event markers default orange
+`#ff9800`: `ema_cross` = circle size 2, `close_above_20` = plus (`+`) size 3.
+These factory values override the `MTF_EMA_COLORS`/`RELATIVE_EMA_COLORS`
+creation-time colours (§8.1) at load via `applyAllIndicatorStyles()`.
+
+### 3.9 `richRoadCandles_v1` — Rich Road Candles (build 113)
+
+Const `RICHROAD_KEY`; factory `RICHROAD_FACTORY`. Shape:
+```js
+{ enabled: true,
+  colors: { highCB, lowCB, dc, dc2, redCB, neutralCB },   // 6 hex
+  params: { highAutoMove:9.5, highMinMove:5, highBodyRatio:0.6, highWickTol:5,
+            lowMinMove:3, dcBodyRatio:0.6, dcWickTol:5, redMove:4 } }
+```
+Section-merged load (`loadRichRoad`). `enabled` is a runtime toggle that only
+persists on Set as Default (like `rsiEnabled`). See §11 for the classifier and
+per-candle recolouring.
 
 ---
 
@@ -607,6 +652,13 @@ weekly #6d4c41 · monthly #00acc1 · quarterly #7cb342
 ```
 `RELATIVE_EMA_COLORS` (~L1211): `rel0 #00897b · rel1 #f9a825 · rel2 #455a64`.
 
+**These are only the series *creation-time* colours** — since build 104
+`applyAllIndicatorStyles()` immediately overrides them from
+`INDICATOR_STYLE_FACTORY` (§3.8), which defaults the M10s column and all
+Relative M10s to **black** (rel0/1/2 solid/dashed/dotted). The values above are
+now effectively dead unless a user restores a per-indicator style that happens
+to match; the live defaults are in `INDICATOR_STYLE_FACTORY`.
+
 ### 8.2 `LINE_STYLE_MAP` (~L933) — style key → library enum
 ```
 solid       → LineStyle.Solid
@@ -686,6 +738,69 @@ layout instead of one tall column that ran off the chart. The render adds a
 `break-inside: avoid` so it's never split across columns. `addRow` appends
 to the current section group. **This is the standard for any future
 settings menu** — build it the same way.
+
+---
+
+## 9c. Unified indicator styling popup & event overlays (builds 104–112)
+
+**One popup for every styleable indicator.** Clicking an indicator's **name**
+in the Indicators dropdown (left-click the name, or right-click anywhere on the
+row) opens `openIndicatorStylePanel(id, x, y)` — the checkbox still toggles
+visibility. The popup adapts to the indicator's *kind* (`INDICATOR_KIND`):
+`line` (colour + 12-swatch palette + **separate** opacity/transparency +
+thickness + line style), `volume` (up/down colour + opacity), `earnings`
+(colour + size), `cross` (colour + shape + size). Each carries Set/Restore
+Default (§3.8). The palette is the shared 12 hex `IND_PALETTE`. Panel is
+appended to `<body>` with **`z-index:1000`** — without it the legend
+(`z-index:5`) paints over it and the popup opens but is invisible.
+
+**RSI/MACD have no generic style — they keep their own panels** but are now
+opened the *same way*: `wirePanelName('rsi'|'macd', …)` wires the dropdown name
+to `renderRsiSettingsPanel`/`renderMacdSettingsPanel`. **The old ⚙ gear buttons
+were removed** (build 107) — supersedes the "settings gear" references in §3.4
+and §4.4. Turnover still opens its box popup on right-click (§3.7).
+
+**Event-marker overlays — `#crossover-overlay`, `#close-above-overlay`.** The
+10/20 EMA cross and Close-above-20-EMA dots are drawn as **custom HTML/SVG
+markers**, NOT native chart markers, so shapes beyond the library's four are
+possible (adds **cross `X`** and **plus `+`**). One shared engine:
+- `computeCrossPoints(data, keyA, keyB, upOnly)` — bars where line A crosses
+  line B (ema_10×ema_20 either way; close×ema_20 upward-only). Stores the four
+  values `{prevTime, time, pa, pb, ca, cb}` around each crossing.
+- `renderEventOverlay(containerId, points, visible, styleId)` — places each dot
+  at the **exact PIXEL intersection** of the two drawn segments. Critical: the
+  price scale is **logarithmic**, so a price-space interpolation converted to a
+  coordinate does NOT lie on the pixel-drawn line (it sat ~16px off). Intersect
+  in pixel space instead (`s = (ypb-ypa)/((yca-ypa)-(ycb-ypb))`).
+- `refreshEventOverlays()` — renders now AND again via a debounced **double-rAF**
+  because a visible-range-change fires its subscription *before* the chart
+  repaints its auto-scaled axis; the deferred pass lands after the repaint so
+  the dots aren't a frame stale. `loadTimeframe`'s `applyFinalRange` also
+  re-renders post-settle. Same pattern any price-anchored HTML overlay needs.
+
+## 9d. Rich Road Candles (build 113)
+
+Recolours each **real** candle by classification, via per-bar `color`/
+`borderColor`/`wickColor` fields on the candlestick series. `paintCandles()`
+rebuilds the candle data (future bars → whitespace, §5) and is called from
+`loadTimeframe` and on any live change; when `richRoad.enabled` is false it
+returns the raw bars (default colours). `classifyCandle(bar)` returns one of six
+colour keys using the adjustable `richRoad.params` (§3.9):
+- **move** = body move `(close-open)/open*100`; **body ratio** =
+  `|close-open|/(high-low)`; **wick tol** = `(open-low)/low*100`.
+- Precedence (first match): **Red CB** (bearish, down ≥ `redMove`) → **High CB**
+  (bullish; move ≥ `highAutoMove`, OR move ≥ `highMinMove` + ratio ≥
+  `highBodyRatio` + wick ≤ `highWickTol`) → **Low CB** (move ≥ `lowMinMove`) →
+  **DC** (ratio ≥ `dcBodyRatio` + wick ≤ `dcWickTol`) → **DC2** (close > ema_10
+  or ema_20, breakout) → **Neutral CB**.
+- These map underspecified source criteria to concrete, fully-adjustable
+  defaults — treat the thresholds as tunable, not canonical.
+
+**UI:** a full-width row at the TOP of `#indicators-panel` (`#richroad-toprow`,
+via `flex-wrap`), checkbox = on/off, name opens `renderRichRoadPanel()` — a
+2-column panel (§9b) with a colour picker + 12-swatch palette per colour and a
+number input per threshold, Set/Restore Default. **Note:** Neutral default is
+white `#ffffff`, so neutral candles blend into the white background by design.
 
 ---
 

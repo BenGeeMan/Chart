@@ -1051,7 +1051,7 @@
       <div id="earnings-overlay"></div>
       <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">104</div>
+      <div id="build-number">105</div>
       <div id="main-no-data">No Data</div>
       <div id="rsi-settings-overlay"></div>
       <div id="macd-settings-overlay"></div>
@@ -3432,11 +3432,17 @@ document.querySelectorAll('#indicators-panel .ind-name').forEach(nameEl => {
   if (!row) return;
   const id = row.dataset.series || row.dataset.mtfEma || row.dataset.relEma;
   if (!id || !INDICATOR_KIND[id]) return;
-  nameEl.addEventListener('click', (e) => {
+  // Both LEFT-click and RIGHT-click open the style popup. preventDefault
+  // stops the left-click from toggling the wrapping <label>'s checkbox and
+  // stops the right-click from raising the browser (or chart) context menu;
+  // right-click matches how the Turnover box styling is opened.
+  const open = (e) => {
     e.preventDefault();
     e.stopPropagation();
     openIndicatorStylePanel(id, e.clientX, e.clientY);
-  });
+  };
+  nameEl.addEventListener('click', open);
+  nameEl.addEventListener('contextmenu', open);
 });
 // Apply saved (or factory) styles now that the menu + series exist.
 applyAllIndicatorStyles();

@@ -1041,7 +1041,7 @@
       <div id="close-above-overlay"></div>
       <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">118</div>
+      <div id="build-number">119</div>
       <div id="main-no-data">No Data</div>
       <div id="rsi-settings-overlay"></div>
       <div id="macd-settings-overlay"></div>
@@ -3226,8 +3226,15 @@ const RICHROAD_KEY = 'richRoadCandles_v1';
 const RICHROAD_FACTORY = {
   enabled: true,
   // Per-type on/off - a candle whose matched type is off is left at its
-  // default appearance (not recoloured).
-  enabledTypes: { highCB: true, lowCB: true, dc: true, dc2: true, redCB: true, neutralCB: true },
+  // default appearance (not recoloured). We're defining the rules one
+  // candle type at a time, so only the type currently being worked on
+  // starts enabled - High CB first.
+  enabledTypes: { highCB: true, lowCB: false, dc: false, dc2: false, redCB: false, neutralCB: false },
+  // Per-type volume requirement (High CB / Low CB only). When on, that
+  // type only qualifies if the bar ALSO prints enough volume on the day -
+  // see the volume gate in classifyCandle and the volMultiplier /
+  // volEmaPeriod params below.
+  useVolume: { highCB: true, lowCB: false },
   colors: {
     highCB:    '#2e1a9c', // navy / indigo - strong bullish
     lowCB:     '#3d5afe', // blue - moderate bullish
@@ -3245,6 +3252,11 @@ const RICHROAD_FACTORY = {
     dcBodyRatio:   0.6, // min body ratio for DC
     dcWickTol:     5,   // max (open-low)/low % for DC
     redMove:       4,   // min down-move% for Red CB
+    // Volume gate (High CB / Low CB, when their Require volume box is on):
+    // the bar must print volume >= volMultiplier x its own volume EMA
+    // (period volEmaPeriod) on the day. Both adjustable in the panel.
+    volEmaPeriod:  20,
+    volMultiplier: 1.5,
   },
 };
 function loadRichRoad() {
@@ -3253,6 +3265,7 @@ function loadRichRoad() {
   return {
     enabled: saved.enabled != null ? saved.enabled : RICHROAD_FACTORY.enabled,
     enabledTypes: Object.assign({}, RICHROAD_FACTORY.enabledTypes, saved.enabledTypes || {}),
+    useVolume: Object.assign({}, RICHROAD_FACTORY.useVolume, saved.useVolume || {}),
     colors: Object.assign({}, RICHROAD_FACTORY.colors, saved.colors || {}),
     params: Object.assign({}, RICHROAD_FACTORY.params, saved.params || {}),
   };
@@ -3261,8 +3274,8 @@ let richRoad = loadRichRoad();
 function persistRichRoad() { try { localStorage.setItem(RICHROAD_KEY, JSON.stringify(richRoad)); } catch (e) {} }
 
 // Returns one of the six colour keys for a real bar, or null if unclassifiable.
-function classifyCandle(bar) {
-  const { open, high, low, close, ema_10, ema_20 } = bar;
+function classifyCandle(bar, volEma) {
+  const { open, high, low, close, ema_10, ema_20, volume } = bar;
   if (open == null || close == null || high == null || low == null) return null;
   const p = richRoad.params;
   const range = high - low;
@@ -3271,15 +3284,31 @@ function classifyCandle(bar) {
   const lowerWickPct = low > 0 ? (open - low) / low * 100 : 0;     // open above the low
   const bullish = close >= open;
 
+  // Volume gate for a candle type. When that type's "Require volume" box
+  // is on, the bar must print volume >= volMultiplier x its own volume EMA
+  // (period volEmaPeriod) - volEma is that bar's precomputed EMA value,
+  // passed in from paintCandles. Off, or missing volume data, means the
+  // gate doesn't restrict.
+  function volumeOk(typeKey) {
+    if (!richRoad.useVolume[typeKey]) return true;
+    if (volEma == null || volume == null) return false;
+    return volume >= p.volMultiplier * volEma;
+  }
+
   // Red CB: bearish with a down move >= threshold.
   if (!bullish && -movePct >= p.redMove) return 'redCB';
 
   if (bullish) {
-    // High CB: auto-qualify on a big move, else strong structure.
-    if (movePct >= p.highAutoMove) return 'highCB';
-    if (movePct >= p.highMinMove && bodyRatio >= p.highBodyRatio && lowerWickPct <= p.highWickTol) return 'highCB';
-    // Low CB: moderate move.
-    if (movePct >= p.lowMinMove) return 'lowCB';
+    // High CB: auto-qualify on a big move, else strong structure - and,
+    // when required, enough volume on the day. If the volume gate fails,
+    // the candle falls through to the checks below rather than becoming a
+    // High CB.
+    if (volumeOk('highCB')) {
+      if (movePct >= p.highAutoMove) return 'highCB';
+      if (movePct >= p.highMinMove && bodyRatio >= p.highBodyRatio && lowerWickPct <= p.highWickTol) return 'highCB';
+    }
+    // Low CB: moderate move (with its own optional volume requirement).
+    if (movePct >= p.lowMinMove && volumeOk('lowCB')) return 'lowCB';
     // DC: below the move threshold but strong structure.
     if (bodyRatio >= p.dcBodyRatio && lowerWickPct <= p.dcWickTol) return 'dc';
   }
@@ -3293,10 +3322,16 @@ function classifyCandle(bar) {
 function paintCandles() {
   if (!barsData.length) return;
   const realIdx = lastRealBarIndex(barsData);
+  // Volume EMA over the REAL bars at the user-set period - the volume gate
+  // in classifyCandle compares each bar's volume against its own EMA value.
+  // Computed here (not reusing currentVolumeEma20) so the Rich Road volume
+  // period stays independent of the volume panel's own EMA.
+  const realData = barsData.slice(0, realIdx + 1);
+  const volEma = calculateEMA(realData, Math.max(1, Math.round(richRoad.params.volEmaPeriod || 20)), 'volume');
   const data = barsData.map((d, i) => {
     if (i > realIdx) return { time: d.time }; // future placeholder -> whitespace
     if (!richRoad.enabled) return d;
-    const type = classifyCandle(d);
+    const type = classifyCandle(d, volEma[i] ? volEma[i].value : null);
     // Skip if unclassified OR that type is switched off in the settings panel.
     if (!type || !richRoad.enabledTypes[type]) return d;
     // Colour fills the candle BODY; the outline (border) and wick stay black.
@@ -3380,6 +3415,13 @@ function renderRichRoadPanel(clientX, clientY) {
     inp.addEventListener('change', () => { const v = parseFloat(inp.value); if (!isNaN(v)) { set(v); paintCandles(); } });
     addRow(labelText, inp);
   }
+  function addCheckRow(labelText, get, set) {
+    const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = !!get();
+    cb.style.marginLeft = 'auto';
+    cb.addEventListener('mousedown', (e) => e.stopPropagation());
+    cb.addEventListener('change', () => { set(cb.checked); paintCandles(); });
+    addRow(labelText, cb);
+  }
 
   addSection('Candle types — on/off + colour');
   addTypeRow('highCB', 'High CB');
@@ -3390,16 +3432,22 @@ function renderRichRoadPanel(clientX, clientY) {
   addTypeRow('neutralCB', 'Neutral');
 
   addSection('High CB thresholds');
+  addCheckRow('Require volume', () => richRoad.useVolume.highCB, (v) => richRoad.useVolume.highCB = v);
   addNumRow('Auto-qualify move %', () => richRoad.params.highAutoMove, (v) => richRoad.params.highAutoMove = v, '0.1');
   addNumRow('Min move %', () => richRoad.params.highMinMove, (v) => richRoad.params.highMinMove = v, '0.1');
   addNumRow('Min body ratio (0-1)', () => richRoad.params.highBodyRatio, (v) => richRoad.params.highBodyRatio = v, '0.05', '0', '1');
   addNumRow('Wick tol % (open above low)', () => richRoad.params.highWickTol, (v) => richRoad.params.highWickTol = v, '0.5');
 
   addSection('Low CB / DC / Red CB');
+  addCheckRow('Low CB require volume', () => richRoad.useVolume.lowCB, (v) => richRoad.useVolume.lowCB = v);
   addNumRow('Low CB min move %', () => richRoad.params.lowMinMove, (v) => richRoad.params.lowMinMove = v, '0.1');
   addNumRow('DC min body ratio (0-1)', () => richRoad.params.dcBodyRatio, (v) => richRoad.params.dcBodyRatio = v, '0.05', '0', '1');
   addNumRow('DC wick tol %', () => richRoad.params.dcWickTol, (v) => richRoad.params.dcWickTol = v, '0.5');
   addNumRow('Red CB down move %', () => richRoad.params.redMove, (v) => richRoad.params.redMove = v, '0.1');
+
+  addSection('Volume');
+  addNumRow('Volume EMA period', () => richRoad.params.volEmaPeriod, (v) => richRoad.params.volEmaPeriod = Math.max(1, Math.round(v)), '1', '1');
+  addNumRow('Volume multiple (× EMA)', () => richRoad.params.volMultiplier, (v) => richRoad.params.volMultiplier = v, '0.1', '0');
 
   const actions = document.createElement('div'); actions.className = 'panel-actions-row';
   const setBtn = document.createElement('button'); setBtn.textContent = 'Set as Default';

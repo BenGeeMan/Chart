@@ -1041,7 +1041,7 @@
       <div id="close-above-overlay"></div>
       <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">128</div>
+      <div id="build-number">129</div>
       <div id="main-no-data">No Data</div>
       <div id="rsi-settings-overlay"></div>
       <div id="macd-settings-overlay"></div>
@@ -3254,6 +3254,10 @@ const RICHROAD_FACTORY = {
     highBodyRatio: 0.8, // "Strong Body Ratio" - min body-to-range ratio for High CB
     highWickTol:   5,   // "Open Near Low Tolerance %" - max (open-low)/low % for High CB
     lowMinMove:    3,   // min move% for Low CB
+    lowMaxBodyRatio: 1, // Low CB only if body ratio <= this. 1 = every >=3% move
+                        // is Low CB (bodies never exceed 1); lower it to hand
+                        // strong-body candles down to DC instead (the Low CB/DC
+                        // boundary dial).
     dcBodyRatio:   0.7, // "Acceptable Body Ratio" - min body ratio for DC
     dcWickTol:     5,   // "Open Near Low Tolerance %" - max (open-low)/low % for DC
     redMove:       4,   // min down-move% for Red CB
@@ -3313,8 +3317,11 @@ function classifyCandle(bar, volEma) {
     // strong body opening near its low - and enough volume when required.
     // If the volume gate fails, it falls through to the checks below.
     if (volumeOk('highCB') && movePct >= p.highMinMove && bodyRatio >= p.highBodyRatio && lowerWickPct <= p.highWickTol) return 'highCB';
-    // Low CB: moderate move (with its own optional volume requirement).
-    if (movePct >= p.lowMinMove && volumeOk('lowCB')) return 'lowCB';
+    // Low CB: moderate move, but only if the body is NOT stronger than
+    // lowMaxBodyRatio - a stronger body falls through to DC below. That
+    // ratio is the user-tunable Low-CB/DC boundary (default 1 = every >=3%
+    // move is Low CB, since bodies never exceed 1).
+    if (movePct >= p.lowMinMove && bodyRatio <= p.lowMaxBodyRatio && volumeOk('lowCB')) return 'lowCB';
     // DC: below the move threshold but strong structure.
     if (bodyRatio >= p.dcBodyRatio && lowerWickPct <= p.dcWickTol) return 'dc';
   }
@@ -3464,6 +3471,7 @@ function renderRichRoadPanel(clientX, clientY) {
   addSection('Low CB / DC / Red CB');
   addCheckRow('Low CB require volume', () => richRoad.useVolume.lowCB, (v) => richRoad.useVolume.lowCB = v);
   addNumRow('Low CB min move %', () => richRoad.params.lowMinMove, (v) => richRoad.params.lowMinMove = v, '0.1');
+  addNumRow('Low CB max body ratio (0-1)', () => richRoad.params.lowMaxBodyRatio, (v) => richRoad.params.lowMaxBodyRatio = v, '0.05', '0', '1');
   addNumRow('DC min body ratio (0-1)', () => richRoad.params.dcBodyRatio, (v) => richRoad.params.dcBodyRatio = v, '0.05', '0', '1');
   addNumRow('DC open near low tolerance %', () => richRoad.params.dcWickTol, (v) => richRoad.params.dcWickTol = v, '0.5');
   addNumRow('Red CB down move %', () => richRoad.params.redMove, (v) => richRoad.params.redMove = v, '0.1');

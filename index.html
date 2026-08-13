@@ -1041,7 +1041,7 @@
       <div id="close-above-overlay"></div>
       <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">127</div>
+      <div id="build-number">128</div>
       <div id="main-no-data">No Data</div>
       <div id="rsi-settings-overlay"></div>
       <div id="macd-settings-overlay"></div>
@@ -3479,7 +3479,17 @@ function renderRichRoadPanel(clientX, clientY) {
   actions.appendChild(setBtn);
   const resBtn = document.createElement('button'); resBtn.textContent = 'Restore Default';
   resBtn.addEventListener('mousedown', (e) => e.stopPropagation());
-  resBtn.addEventListener('click', (e) => { e.stopPropagation(); const wasOn = richRoad.enabled; richRoad = loadRichRoad(); richRoad.enabled = wasOn; paintCandles(); renderRichRoadPanel(); });
+  resBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    // Restore Default = reset to the SHIPPED factory defaults AND clear any
+    // saved override, so it reliably matches what's in the code. Previously
+    // it reloaded the saved snapshot (Set as Default), which meant a stale
+    // save in localStorage silently shadowed every pushed change - during
+    // active rule-tuning that made new builds appear to do nothing.
+    try { localStorage.removeItem(RICHROAD_KEY); } catch (err) {}
+    richRoad = clone(RICHROAD_FACTORY);
+    paintCandles(); renderRichRoadPanel();
+  });
   actions.appendChild(resBtn);
   panel.appendChild(actions);
   document.body.appendChild(panel);

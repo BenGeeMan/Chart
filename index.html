@@ -1041,7 +1041,7 @@
       <div id="close-above-overlay"></div>
       <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">123</div>
+      <div id="build-number">124</div>
       <div id="main-no-data">No Data</div>
       <div id="rsi-settings-overlay"></div>
       <div id="macd-settings-overlay"></div>
@@ -3388,18 +3388,29 @@ function renderRichRoadPanel(clientX, clientY) {
   // A candle type: an on/off checkbox (enabledTypes[key]) + colour picker + the
   // 12-swatch palette. Switching a type off leaves its candles at default.
   function addTypeRow(key, labelText) {
-    const wrap = document.createElement('div');
-    wrap.style.display = 'flex'; wrap.style.flexDirection = 'column'; wrap.style.gap = '4px'; wrap.style.flex = '1';
+    // Name on its OWN line, then the checkbox + colour picker + palette
+    // beneath it - all left-aligned to the same edge so every type's
+    // colours start under the first letter of the name and span the same
+    // width (uniform across rows), rather than being offset by the
+    // varying name width in a label-left / controls-right layout.
+    const block = document.createElement('div');
+    block.style.marginBottom = '10px';
+    const name = document.createElement('div');
+    name.textContent = labelText;
+    name.style.color = 'var(--text-dim)';
+    name.style.marginBottom = '3px';
+    block.appendChild(name);
+
     const top = document.createElement('div');
-    top.style.display = 'flex'; top.style.alignItems = 'center'; top.style.gap = '6px';
+    top.style.display = 'flex'; top.style.alignItems = 'center'; top.style.gap = '6px'; top.style.marginBottom = '4px';
     const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = richRoad.enabledTypes[key];
     const ci = document.createElement('input'); ci.type = 'color'; ci.value = richRoad.colors[key]; ci.disabled = !richRoad.enabledTypes[key];
     let sync;
     cb.addEventListener('mousedown', (e) => e.stopPropagation());
     cb.addEventListener('change', () => { richRoad.enabledTypes[key] = cb.checked; ci.disabled = !cb.checked; paintCandles(); });
     ci.addEventListener('input', () => { richRoad.colors[key] = ci.value; sync(); paintCandles(); });
-    ci.style.marginLeft = 'auto';
     top.appendChild(cb); top.appendChild(ci);
+
     const grid = document.createElement('div'); grid.className = 'color-swatch-grid';
     const els = [];
     sync = () => { const cur = (richRoad.colors[key] || '').toLowerCase(); els.forEach(e => e.classList.toggle('selected', e.dataset.color.toLowerCase() === cur)); };
@@ -3410,8 +3421,8 @@ function renderRichRoadPanel(clientX, clientY) {
       sw.addEventListener('click', (e) => { e.stopPropagation(); if (!richRoad.enabledTypes[key]) return; ci.value = hex; richRoad.colors[key] = hex; sync(); paintCandles(); });
       els.push(sw); grid.appendChild(sw);
     });
-    wrap.appendChild(top); wrap.appendChild(grid);
-    addRow(labelText, wrap); sync();
+    block.appendChild(top); block.appendChild(grid);
+    (section || body).appendChild(block); sync();
   }
   function addNumRow(labelText, get, set, step, min, max) {
     const inp = document.createElement('input'); inp.type = 'number'; inp.value = get();

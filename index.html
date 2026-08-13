@@ -1041,7 +1041,7 @@
       <div id="close-above-overlay"></div>
       <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">121</div>
+      <div id="build-number">122</div>
       <div id="main-no-data">No Data</div>
       <div id="rsi-settings-overlay"></div>
       <div id="macd-settings-overlay"></div>
@@ -3225,11 +3225,13 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeIndic
 const RICHROAD_KEY = 'richRoadCandles_v1';
 const RICHROAD_FACTORY = {
   enabled: true,
-  // Per-type on/off - a candle whose matched type is off is left at its
-  // default appearance (not recoloured). We're defining the rules one
-  // candle type at a time, so only the type currently being worked on
-  // starts enabled - High CB first.
-  enabledTypes: { highCB: true, lowCB: false, dc: false, dc2: false, redCB: false, neutralCB: false },
+  // All six types ON so EVERY candle is painted by Rich Road (otherwise a
+  // disabled type falls back to the plain candlestick look - white up /
+  // red down - which is misleading). During this definition phase only the
+  // type we're actively working on keeps its real colour; the rest are set
+  // to white below so the worked-on type stands out. Restore each real
+  // colour as we finalize that type.
+  enabledTypes: { highCB: true, lowCB: true, dc: true, dc2: true, redCB: true, neutralCB: true },
   // Per-type volume requirement (High CB / Low CB only). Off by default so
   // classification matches the original RichRoad MA v3 (which has no volume
   // filter); it's a user-added enhancement, toggleable per type in the panel.
@@ -3238,11 +3240,11 @@ const RICHROAD_FACTORY = {
   // volMultiplier / volEmaPeriod params below.
   useVolume: { highCB: false, lowCB: false },
   colors: {
-    highCB:    '#2e1a9c', // navy / indigo - strong bullish
-    lowCB:     '#3d5afe', // blue - moderate bullish
-    dc:        '#43a047', // green - demand candle
-    dc2:       '#12a186', // teal - demand candle (breakout)
-    redCB:     '#f2334d', // red - bearish
+    highCB:    '#2e1a9c', // navy / indigo - strong bullish  <-- WORKING ON THIS
+    lowCB:     '#ffffff', // real: #3d5afe (blue)  - white during definition phase
+    dc:        '#ffffff', // real: #43a047 (green) - white during definition phase
+    dc2:       '#ffffff', // real: #12a186 (teal)  - white during definition phase
+    redCB:     '#ffffff', // real: #f2334d (red)   - white during definition phase
     neutralCB: '#ffffff', // white - no conviction
   },
   params: {

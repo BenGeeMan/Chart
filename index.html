@@ -1041,7 +1041,7 @@
       <div id="close-above-overlay"></div>
       <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">119</div>
+      <div id="build-number">120</div>
       <div id="main-no-data">No Data</div>
       <div id="rsi-settings-overlay"></div>
       <div id="macd-settings-overlay"></div>
@@ -3295,18 +3295,19 @@ function classifyCandle(bar, volEma) {
     return volume >= p.volMultiplier * volEma;
   }
 
+  // High CB AUTO-QUALIFY: any candle whose body move is >= the auto
+  // threshold is a High CB regardless of structure, volume, or anything
+  // else. Checked first, so nothing below can override or gate it.
+  if (movePct >= p.highAutoMove) return 'highCB';
+
   // Red CB: bearish with a down move >= threshold.
   if (!bullish && -movePct >= p.redMove) return 'redCB';
 
   if (bullish) {
-    // High CB: auto-qualify on a big move, else strong structure - and,
-    // when required, enough volume on the day. If the volume gate fails,
-    // the candle falls through to the checks below rather than becoming a
-    // High CB.
-    if (volumeOk('highCB')) {
-      if (movePct >= p.highAutoMove) return 'highCB';
-      if (movePct >= p.highMinMove && bodyRatio >= p.highBodyRatio && lowerWickPct <= p.highWickTol) return 'highCB';
-    }
+    // High CB (structural): a move below the auto threshold, but with a
+    // strong body opening near its low - and enough volume when required.
+    // If the volume gate fails, it falls through to the checks below.
+    if (volumeOk('highCB') && movePct >= p.highMinMove && bodyRatio >= p.highBodyRatio && lowerWickPct <= p.highWickTol) return 'highCB';
     // Low CB: moderate move (with its own optional volume requirement).
     if (movePct >= p.lowMinMove && volumeOk('lowCB')) return 'lowCB';
     // DC: below the move threshold but strong structure.

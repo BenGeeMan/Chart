@@ -1041,7 +1041,7 @@
       <div id="close-above-overlay"></div>
       <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">129</div>
+      <div id="build-number">130</div>
       <div id="main-no-data">No Data</div>
       <div id="rsi-settings-overlay"></div>
       <div id="macd-settings-overlay"></div>
@@ -3433,12 +3433,11 @@ function renderRichRoadPanel(clientX, clientY) {
   }
   function addNumRow(labelText, get, set, step, min, max) {
     const inp = document.createElement('input'); inp.type = 'number'; inp.value = get();
-    // step="any" so the field accepts ANY typed value. A fixed step (0.5,
-    // 0.1, ...) makes the browser flag an off-step entry with a red "!"
-    // validation marker even though our change handler parses and applies
-    // it fine - these are free tuning fields, so no step constraint. min/max
-    // still enforced where meaningful (e.g. body ratio 0-1, period >= 1).
-    inp.step = 'any';
+    // Use the given step for the up/down spinner (e.g. 0.05 on ratio fields,
+    // so the buttons increment by 0.05). Pass step='any' for free-typing
+    // fields (the move %/tolerance fields) so an off-step typed value doesn't
+    // trip the browser's red "!" validation marker.
+    inp.step = step != null ? step : 'any';
     if (min != null) inp.min = min; if (max != null) inp.max = max;
     inp.style.flex = '1';
     inp.addEventListener('mousedown', (e) => e.stopPropagation());
@@ -3466,14 +3465,14 @@ function renderRichRoadPanel(clientX, clientY) {
   addNumRow('Auto-qualify move %', () => richRoad.params.highAutoMove, (v) => richRoad.params.highAutoMove = v, '0.1');
   addNumRow('Min move %', () => richRoad.params.highMinMove, (v) => richRoad.params.highMinMove = v, '0.1');
   addNumRow('Min body ratio (0-1)', () => richRoad.params.highBodyRatio, (v) => richRoad.params.highBodyRatio = v, '0.05', '0', '1');
-  addNumRow('Open near low tolerance %', () => richRoad.params.highWickTol, (v) => richRoad.params.highWickTol = v, '0.5');
+  addNumRow('Open near low tolerance %', () => richRoad.params.highWickTol, (v) => richRoad.params.highWickTol = v, 'any');
 
   addSection('Low CB / DC / Red CB');
   addCheckRow('Low CB require volume', () => richRoad.useVolume.lowCB, (v) => richRoad.useVolume.lowCB = v);
   addNumRow('Low CB min move %', () => richRoad.params.lowMinMove, (v) => richRoad.params.lowMinMove = v, '0.1');
   addNumRow('Low CB max body ratio (0-1)', () => richRoad.params.lowMaxBodyRatio, (v) => richRoad.params.lowMaxBodyRatio = v, '0.05', '0', '1');
   addNumRow('DC min body ratio (0-1)', () => richRoad.params.dcBodyRatio, (v) => richRoad.params.dcBodyRatio = v, '0.05', '0', '1');
-  addNumRow('DC open near low tolerance %', () => richRoad.params.dcWickTol, (v) => richRoad.params.dcWickTol = v, '0.5');
+  addNumRow('DC open near low tolerance %', () => richRoad.params.dcWickTol, (v) => richRoad.params.dcWickTol = v, 'any');
   addNumRow('Red CB down move %', () => richRoad.params.redMove, (v) => richRoad.params.redMove = v, '0.1');
 
   addSection('Volume');

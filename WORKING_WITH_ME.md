@@ -100,6 +100,13 @@ project-specific handoff document exists for that project.
 - After each change, a short, direct summary of what changed plus any
   caveats I should know about is more useful to me than a long
   explanation of how you got there.
+- When I hit a decision I need to think through on my own, I'll ask to
+  park it. When I do: save the current state cleanly, and proactively
+  raise it again at the START of the next session rather than waiting
+  for me to remember it.
+- When a choice has a genuine trade-off, I sometimes ask for it "in very
+  simple terms" - give me the plain-English version (what I gain vs give
+  up), not the mechanism.
 
 ---
 

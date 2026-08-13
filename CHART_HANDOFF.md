@@ -38,15 +38,52 @@ not just this once** — treat it as standing practice, not a one-off.
 
 ## 0. NEXT SESSION PRIORITIES (read this first)
 
-**TOP PRIORITY next session — Rich Road classification is still wrong.** The
-settings menu is now fully working, but when the user checked the actual candle
-**classification** against the real AAPL data they confirmed *"it's not right."*
-The classifier logic/thresholds need the user's real rules — do **not** re-guess;
-ask for the concrete numbers. Main suspects (all live-editable in the panel,
-current values are placeholders): **DC2** fires on *any* close above the 10/20 EMA
-(~206/500 bars on ABNB daily; likely should be a real breakout/cross, or off);
-**High CB min move** (5%); **DC move-range** (undefined). Classifier is Tech Ref
-§9d; params in `RICHROAD_FACTORY` / `richRoadCandles_v1`.
+**TWO threads open next session (both parked by the user 2026-08-13):**
+
+1. **NEW PROJECT — capture the user's video trading course.** The user is a
+   student in a ~40-video (1–2 hr each) trading course, mostly English with some
+   Hindi/Hinglish. The end goal of this whole effort is to teach the assistant the
+   course's method and the user's trading-decision logic, then build tools around
+   it (this chart being the first). Plan + how to resume is in
+   **`COURSE_LEARNING_PLAN.md`**. **Resume here first** with the free lesson-1 pilot.
+
+2. **Rich Road candles — DC vs Low CB modelling question (paused mid-tuning).**
+   The user needs to think through, in plain English, how a **DC** differs from a
+   **Low CB** before we continue. The tangle: we tried to split them by *body
+   ratio* but they overlap there; the real separator in the definitions is the
+   *move* (DC = strong clean candle that barely moved; Low CB = moved ≥3% but
+   messier). **Ask the user about this at the start of the session** before
+   touching DC. See §9d / `RICHROAD_FACTORY`.
+
+**Session update (builds 118 → 130) — Rich Road candle classification.** Went from
+"the menu works but classification is wrong" to a working, user-validated
+classifier for the first two types. Big shift: **we are no longer copying the
+original "RichRoad MA v3" exactly — we're building the user's *preferred* version,
+validated by eye against their TradingView, keeping whatever they prefer.** The
+original spec (definitions + Inputs panel) was supplied and is captured in the
+assistant's memory. Progress:
+- **High CB — DONE, matches the original spec.** Auto-qualify move > 9.5%; else
+  move ≥ 4.8% AND body ratio ≥ 0.8 AND open within 5% of the low. Volume gate off.
+- **Low CB — DONE, the user's preferred version** (doesn't match the original but
+  they prefer ours): bullish, move ≥ 3%, that didn't qualify as High CB.
+- **DC — paused** (see thread 2 above).
+- **New tunables:** per-type **Require-volume** toggle + a **Volume** section
+  (`volEmaPeriod` 20, `volMultiplier` 1.5 — a CB needs volume ≥ multiplier × its
+  own volume-EMA; **off by default**, it's an enhancement not in the original); a
+  **Low CB max body ratio** dial (`lowMaxBodyRatio`, default 1) for the Low-CB/DC
+  boundary. All param values now match the original Inputs (4.8/9.5/0.8/0.7/5/3/4).
+- **Validation workflow:** all six types stay enabled so every candle is painted;
+  only the type under test keeps its real colour, the rest go white (real colours
+  preserved in code comments). Restore each colour as its rules are locked.
+- **`Restore Default` now resets to the shipped factory AND clears the saved
+  `richRoadCandles_v1`** (was: reloaded the saved snapshot — a stale "Set as
+  Default" silently shadowed every pushed change; the tell is panel *structure*
+  updating but *colours* not). During tuning: avoid Set as Default; if a change
+  doesn't show, hard-refresh then Restore Default once.
+- **Deploy gotcha reconfirmed hard this session:** rapid consecutive pushes wedge
+  GitHub Pages (concurrency cancels the build); fix with
+  `gh api -X POST repos/BenGeeMan/Chart/pages/builds`. Batch pushes.
+- Details: classifier Tech Ref §9d; params/store §3.9.
 
 **Session update (builds 115 → 118).** Rich Road Candles settings menu made
 discoverable/usable. The panel already had every control (per-type on/off +
@@ -296,7 +333,7 @@ that logic gets turned into permanent, automatable code.
 
 | File | Purpose |
 |---|---|
-| `index.html` | The entire app - a single self-contained HTML file. Must keep this exact filename; GitHub Pages requires it. Contains a visible build-number watermark (currently **118**), manually incremented on every handoff, purely so the user can confirm a hard refresh actually picked up new code after repeated caching confusion during development. |
+| `index.html` | The entire app - a single self-contained HTML file. Must keep this exact filename; GitHub Pages requires it. Contains a visible build-number watermark (currently **118**), manually incremented on every handoff, purely so the user can confirm a hard refresh actually picked up new code after repeated caching confusion during development (currently **130**). |
 | `chart_watchlist.json` | Quote summary for the 12 watchlist stocks. |
 | `chart_earnings.json` | Earnings dates (past ~3 years + upcoming) per watchlist stock. Note: no AAPL entry yet. |
 | `{ticker}_{timeframe}.json` | Price + indicator data per stock per timeframe (84 files: 12 stocks × 7 timeframes). The 11 synthetic tickers extend past "today" with future placeholder bars (flat OHLC in the raw JSON) — see Section 4 for how `index.html` renders that trailing region. **`aapl_*` is the exception:** real Yahoo data ending at the last real trading day, no placeholder bars (see Section 0). |

@@ -28,7 +28,7 @@ mandates. Line numbers below are written as *approximate anchors*
 is the durable locator, not the number.
 
 All anchors below refer to `index.html` unless stated otherwise. Build
-number at time of writing: **113**.
+number at time of writing: **130**.
 
 ---
 
@@ -289,18 +289,39 @@ creation-time colours (§8.1) at load via `applyAllIndicatorStyles()`.
 
 ### 3.9 `richRoadCandles_v1` — Rich Road Candles (build 113)
 
-Const `RICHROAD_KEY`; factory `RICHROAD_FACTORY`. Shape:
+Const `RICHROAD_KEY`; factory `RICHROAD_FACTORY`. Shape (values match the original
+RichRoad MA v3 Inputs as of build 121):
 ```js
 { enabled: true,
   enabledTypes: { highCB, lowCB, dc, dc2, redCB, neutralCB },  // per-type on/off
+  useVolume:    { highCB:false, lowCB:false },                 // per-type volume gate (added build 119)
   colors:       { highCB, lowCB, dc, dc2, redCB, neutralCB },  // 6 hex
-  params: { highAutoMove:9.5, highMinMove:5, highBodyRatio:0.6, highWickTol:5,
-            lowMinMove:3, dcBodyRatio:0.6, dcWickTol:5, redMove:4 } }
+  params: { highAutoMove:9.5, highMinMove:4.8, highBodyRatio:0.8, highWickTol:5,
+            lowMinMove:3, lowMaxBodyRatio:1, dcBodyRatio:0.7, dcWickTol:5, redMove:4,
+            volEmaPeriod:20, volMultiplier:1.5 } }
 ```
 Section-merged load (`loadRichRoad`). `enabled` is a runtime toggle that only
 persists on Set as Default (like `rsiEnabled`). `enabledTypes` switches each
 candle type on/off individually (an off type is left at default appearance).
 See §9d for the classifier and per-candle recolouring.
+
+- **`useVolume`** (build 119): per-type Require-volume toggle for High CB / Low CB.
+  When on, that type also requires `volume >= volMultiplier × its own volume-EMA`
+  (period `volEmaPeriod`) on the bar. **Off by default** — the original has no
+  volume filter; this is a user enhancement. `paintCandles()` computes the volume
+  EMA fresh (independent of the volume panel's EMA) and passes each bar's value
+  into `classifyCandle(bar, volEma)`.
+- **`lowMaxBodyRatio`** (build 129): the Low-CB/DC boundary dial. Low CB only
+  applies when body ratio ≤ this. Default 1 = every ≥3% move is Low CB; lower it to
+  hand strong-body ≥3% candles down to DC (0.7 ≈ all of them on AAPL).
+- **`Restore Default` (build 128): resets to the shipped `RICHROAD_FACTORY` AND
+  `localStorage.removeItem(RICHROAD_KEY)`** — was previously "reload the saved
+  snapshot", which let a stale Set-as-Default silently shadow every pushed change.
+  Symptom of a stale save: panel STRUCTURE (labels/layout, from code) updates but
+  COLOURS/enabled (from the store) don't.
+- Panel number fields (build 130): body-ratio (0–1) fields step by 0.05 on the
+  spinner; move %/tolerance fields use `step="any"` so an off-step typed value
+  doesn't trip the browser's red "!" validation marker.
 
 **Settings panel (build 118).** `renderRichRoadPanel(clientX, clientY)` opens on
 left- or right-click of the indicator name via `wirePanelName`, positioned **at
@@ -796,17 +817,23 @@ and on any live change. A classified bar gets **`color` = the type colour (body
 fill), `borderColor` = black, `wickColor` = black** — coloured body, black
 outline + wick. A bar is left at its default appearance when Rich Road is off,
 the bar is unclassified, or its matched type is switched off in `enabledTypes`
-(§3.9). `classifyCandle(bar)` returns one of six colour keys using the
-adjustable `richRoad.params`:
+(§3.9). `classifyCandle(bar, volEma)` returns one of six colour keys using the
+adjustable `richRoad.params` (`volEma` is that bar's volume-EMA value, for the
+volume gate):
 - **move** = body move `(close-open)/open*100`; **body ratio** =
-  `|close-open|/(high-low)`; **wick tol** = `(open-low)/low*100`.
-- Precedence (first match): **Red CB** (bearish, down ≥ `redMove`) → **High CB**
-  (bullish; move ≥ `highAutoMove`, OR move ≥ `highMinMove` + ratio ≥
-  `highBodyRatio` + wick ≤ `highWickTol`) → **Low CB** (move ≥ `lowMinMove`) →
-  **DC** (ratio ≥ `dcBodyRatio` + wick ≤ `dcWickTol`) → **DC2** (close > ema_10
-  or ema_20, breakout) → **Neutral CB**.
-- These map underspecified source criteria to concrete, fully-adjustable
-  defaults — treat the thresholds as tunable, not canonical.
+  `|close-open|/(high-low)`; **wick tol** = `(open-low)/low*100`. **`volumeOk(t)`**
+  = `!useVolume[t]` OR `volume >= volMultiplier*volEma`.
+- Precedence (first match): **High CB auto** (move ≥ `highAutoMove` 9.5 — beats
+  everything, ungated) → **Red CB** (bearish, down ≥ `redMove`) → **High CB**
+  structural (bullish; `volumeOk('highCB')` + move ≥ `highMinMove` 4.8 + ratio ≥
+  `highBodyRatio` 0.8 + wick ≤ `highWickTol` 5) → **Low CB** (move ≥ `lowMinMove` 3
+  + ratio ≤ `lowMaxBodyRatio` + `volumeOk('lowCB')`) → **DC** (ratio ≥ `dcBodyRatio`
+  0.7 + wick ≤ `dcWickTol` 5) → **DC2** (close > ema_10 or ema_20) → **Neutral CB**.
+- **State of validation (2026-08-13):** High CB matches the original spec (locked);
+  Low CB is the user's preferred version (locked, intentionally divergent); DC is
+  paused pending the user's DC-vs-Low-CB decision (see §0 of CHART_HANDOFF). We are
+  building the user's preferred version, not a strict copy of the original — treat
+  thresholds as the user's evolving rules, not canonical.
 
 **UI:** the first row of the **Indicators column** (`data-series="richroad"`);
 checkbox = whole-indicator on/off, name opens `renderRichRoadPanel()` — a

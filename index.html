@@ -1041,7 +1041,7 @@
       <div id="close-above-overlay"></div>
       <div id="drawing-overlay"></div>
       <div id="chart"></div>
-      <div id="build-number">120</div>
+      <div id="build-number">121</div>
       <div id="main-no-data">No Data</div>
       <div id="rsi-settings-overlay"></div>
       <div id="macd-settings-overlay"></div>
@@ -3230,11 +3230,13 @@ const RICHROAD_FACTORY = {
   // candle type at a time, so only the type currently being worked on
   // starts enabled - High CB first.
   enabledTypes: { highCB: true, lowCB: false, dc: false, dc2: false, redCB: false, neutralCB: false },
-  // Per-type volume requirement (High CB / Low CB only). When on, that
-  // type only qualifies if the bar ALSO prints enough volume on the day -
-  // see the volume gate in classifyCandle and the volMultiplier /
-  // volEmaPeriod params below.
-  useVolume: { highCB: true, lowCB: false },
+  // Per-type volume requirement (High CB / Low CB only). Off by default so
+  // classification matches the original RichRoad MA v3 (which has no volume
+  // filter); it's a user-added enhancement, toggleable per type in the panel.
+  // When on, that type only qualifies if the bar ALSO prints enough volume
+  // on the day - see the volume gate in classifyCandle and the
+  // volMultiplier / volEmaPeriod params below.
+  useVolume: { highCB: false, lowCB: false },
   colors: {
     highCB:    '#2e1a9c', // navy / indigo - strong bullish
     lowCB:     '#3d5afe', // blue - moderate bullish
@@ -3244,13 +3246,14 @@ const RICHROAD_FACTORY = {
     neutralCB: '#ffffff', // white - no conviction
   },
   params: {
-    highAutoMove:  9.5, // move% that auto-qualifies High CB regardless of structure
-    highMinMove:   5,   // min move% for structural High CB
-    highBodyRatio: 0.6, // min body-to-range ratio for High CB
-    highWickTol:   5,   // max (open-low)/low % for High CB (low-wick tolerance)
+    // Values below match the original "RichRoad MA v3" indicator's Inputs.
+    highAutoMove:  9.5, // "High_CB Override % Change" - auto-qualifies High CB regardless of structure
+    highMinMove:   4.8, // "High_CB Min % Change" - min move% for structural High CB
+    highBodyRatio: 0.8, // "Strong Body Ratio" - min body-to-range ratio for High CB
+    highWickTol:   5,   // "Open Near Low Tolerance %" - max (open-low)/low % for High CB
     lowMinMove:    3,   // min move% for Low CB
-    dcBodyRatio:   0.6, // min body ratio for DC
-    dcWickTol:     5,   // max (open-low)/low % for DC
+    dcBodyRatio:   0.7, // "Acceptable Body Ratio" - min body ratio for DC
+    dcWickTol:     5,   // "Open Near Low Tolerance %" - max (open-low)/low % for DC
     redMove:       4,   // min down-move% for Red CB
     // Volume gate (High CB / Low CB, when their Require volume box is on):
     // the bar must print volume >= volMultiplier x its own volume EMA

@@ -90,14 +90,16 @@ richroad-course/              ← PRIVATE repo (copyrighted course content)
 foundations are solid before building on them; a shaky prerequisite flags every
 concept downstream of it.
 
-## Capture workflow (frees the user's time)
-1. **Gemini (Google AI Studio)** watches each video → timestamped transcript +
-   description + a list of key visual moments. (Alternative: local Buzz/Whisper —
-   free, private, words-only + manual screenshots, slower. Decide after the pilot.)
-2. A **script (ffmpeg) the assistant writes** pulls those exact frames from the
-   local video into `frames/` — automatic, no manual screenshotting.
+## Capture workflow (frees the user's time) — SETTLED after the lesson-1 pilot
+1. **Local faster-whisper** transcribes each ~11-min chunk → timestamped Markdown:
+   `/home/ben/whisper-venv/bin/python tools/transcribe.py <chunk> <offset_s> small <out.md>`
+   (~8.5 min CPU per chunk; the offset makes chunk-local times lesson-global).
+   Runs unattended and harness-tracked, so it notifies on completion.
+2. Assistant stitches the chunks, reads the transcript, and picks the key timestamps
+   itself; **ffmpeg** pulls exactly those frames into `frames/` — no manual
+   screenshotting.
 3. Assistant reads transcript + frames → writes `notes.md`, updates the relevant
-   `concepts/` nodes + `concept-map.md` + `quiz.md`.
+   `concepts/` nodes + `concept-map.md` + `quiz.md` + `doubts.md`.
 
 ## Session workflow (we do this together)
 - We **watch a lesson together**; I **show the relevant frames** inline and
@@ -112,21 +114,39 @@ Raw videos stay **local / external drive** (too big for GitHub). Transcripts,
 frames, notes → the **PRIVATE** repo only, never the public Chart repo. The course
 is copyrighted; this is personal-study use.
 
-## Cloud vs local + cost
-Gemini Flash for the whole ~40 videos ≈ **$15–30** (low-res ~half; pilot free).
-Trade-off: uploads copyrighted video to Google vs Buzz staying fully local. The
-lesson-1 pilot gives an exact per-video token count to firm this up.
+## Cloud vs local — DECIDED: local, £0
+The Gemini/AI Studio route (≈$15–30 for all 40) was **dropped**. Local Whisper is
+free, nothing leaves the machine, and lesson 1 came out clean (English 0.98–0.99).
+Cloud's one real advantage — describing visuals — proved unnecessary: his recordings
+are **screen shares** (Excalidraw for teaching, TradingView for charts) with the
+**cursor and crosshair visible in frame**. Excalidraw drawings accumulate, so one
+frame at the end of a segment holds the whole diagram; the TradingView crosshair
+prints exact price and date, so frames are precise enough to rebuild a moment on real
+data. Gesture is therefore a non-issue.
 
 ## Effort estimate
 ~**10–16 sessions of 5 hours** to interpret all 40 and fold them into
 concepts/tools (~2–3 lessons per session). The pilot calibrates it exactly.
 Incremental — value accrues each session, no big upfront commitment.
 
-## Pilot progress & learnings (2026-08-13)
-Lesson-1 pilot is **in progress**. Practical learnings so far:
-- **The course repo now exists:** `~/GitHub/richroad-course/` (git-init'd) — skeleton +
-  `ai-studio-prompt.md` (the reusable transcription prompt) + `sessions/001-lesson-01/`.
-  Raw videos are `.gitignore`d; they live in `~/Downloads/Course/`.
+## Pilot COMPLETE (2026-08-14) — lesson 1 processed end to end
+The course repo is live and private: **https://github.com/BenGeeMan/richroad-course**
+(`~/GitHub/richroad-course/`). **Read its `INDEX.md` first** — it's the front door.
+Lesson 1 produced: `transcript.md` (407 segments), 18 frames, `notes.md`, 5 concept
+nodes, `concept-map.md`, `quiz.md` (answered, 4½/5) and `doubts.md`.
+
+**Things learned that changed the plan:**
+- **The course opens with few rules on purpose** — rules sharpen over time but stay
+  loose, always applied through perception. So doubts are **logged, not chased**;
+  `doubts.md` tracks them with **lecture 19** as the sweep checkpoint (his marker that
+  many should have gone by then). 3 of 8 already resolved.
+- **An indicator's job is to make the chart readable to a human** — not a rule engine;
+  he warns against leaning on indicators instead of watching price action unfold.
+  So Rich Road's thresholds are a **colouring convention**: tune for **legibility**,
+  not for accuracy or agreement with TradingView.
+- **DC = Demand Candle, CB = Committed Buyers candle** — both defined later in the
+  course, so the DC-vs-Low-CB tuning stays **paused** rather than guessed at (D006).
+- Raw videos are `.gitignore`d; they live in `~/Downloads/Course/`.
 - **Recording (SimpleScreenRecorder on Linux Mint):** full screen 1080p / 30fps /
   H.264 / MKV / superfast / CRF 18, audio source = **"Monitor of…"** (system sound).
   **Tip: set SSR's audio codec to compressed (Vorbis/AAC), NOT Uncompressed** — PCM
@@ -134,19 +154,22 @@ Lesson-1 pilot is **in progress**. Practical learnings so far:
 - **Post-record steps (assistant does these on the machine):** trim black tail
   (`ffmpeg -to <end> -c copy`; find the real end with `blackdetect`), convert MKV→MP4
   for upload (`-c:v copy -c:a aac`), and **split into ~11-min chunks** (see next).
-- **AI Studio free tier = model `Gemini 3 Flash Preview`** (Gemini 2.5 is PAID — do
-  not upgrade). The full 33-min video (and even a single 11-min chunk) shows a red
-  **"Token count failed"** — that's just the pre-flight counter; the run itself can
-  still work once the video **"extracting"** step finishes. Uploading the whole
-  33-min file was unreliable, so we **split into ~11-min chunks** (`ffmpeg -f segment
-  -segment_time 00:11:20 -reset_timestamps 1`), one per **fresh chat**, run one at a
-  time (free-tier rate limits). Each chunk's timestamps are local 0:00 — assistant
-  offsets them when stitching (part0=0:00, part1=11:20, part2=22:43).
+- **Chunking** (`ffmpeg -f segment -segment_time 00:11:20 -reset_timestamps 1`) is
+  still worth doing — it keeps each transcription run short and restartable. Each
+  chunk's timestamps are local 0:00, so pass the offset (part0=0, part1=680,
+  part2=1363) and they come out lesson-global.
 
 ## Immediate next step (resume here)
-Finish transcribing lesson 1 in AI Studio (3 chunks → paste each output back,
-assistant stitches + offsets timestamps). Then: extract the flagged key frames →
-`frames/`, write `notes.md`, build the first `concepts/` node + `concept-map.md` +
-`quiz.md`, and do the test-each-other loop. After lesson 1, read the real token
-cost/effort and decide whether to keep the Gemini route or fall back to local Buzz.
-(Separately parked: the DC-vs-Low-CB modelling question — `CHART_HANDOFF.md` §0.)
+**Record lesson 2** → `~/Downloads/Course/`, then run the pipeline above (chunk,
+transcribe locally, stitch, frames, notes, concepts, doubts).
+
+**Then: the comprehension test.** After lecture 2 the user draws on a chart and the
+assistant says what it shows in the language of the lectures — the real check that
+the library transfers. Works today via screenshot (the Chart tool has trendline /
+hline / ray / hray with editing). Note drawings are **in-memory only**
+(`userDrawings`, `index.html:5081`), so they don't survive a reload and can't be read
+directly; if eyeballing screenshots proves too imprecise, add a drawings→JSON export
+for exact price/time.
+
+(Still parked: the DC-vs-Low-CB modelling question — `CHART_HANDOFF.md` §0 — now
+waiting on the course to define Demand Candle and Committed Buyers.)

@@ -122,11 +122,31 @@ lesson-1 pilot gives an exact per-video token count to firm this up.
 concepts/tools (~2–3 lessons per session). The pilot calibrates it exactly.
 Incremental — value accrues each session, no big upfront commitment.
 
+## Pilot progress & learnings (2026-08-13)
+Lesson-1 pilot is **in progress**. Practical learnings so far:
+- **The course repo now exists:** `~/GitHub/richroad-course/` (git-init'd) — skeleton +
+  `ai-studio-prompt.md` (the reusable transcription prompt) + `sessions/001-lesson-01/`.
+  Raw videos are `.gitignore`d; they live in `~/Downloads/Course/`.
+- **Recording (SimpleScreenRecorder on Linux Mint):** full screen 1080p / 30fps /
+  H.264 / MKV / superfast / CRF 18, audio source = **"Monitor of…"** (system sound).
+  **Tip: set SSR's audio codec to compressed (Vorbis/AAC), NOT Uncompressed** — PCM
+  made lesson 1's MKV 465 MB; converting to AAC dropped it to 122 MB.
+- **Post-record steps (assistant does these on the machine):** trim black tail
+  (`ffmpeg -to <end> -c copy`; find the real end with `blackdetect`), convert MKV→MP4
+  for upload (`-c:v copy -c:a aac`), and **split into ~11-min chunks** (see next).
+- **AI Studio free tier = model `Gemini 3 Flash Preview`** (Gemini 2.5 is PAID — do
+  not upgrade). The full 33-min video (and even a single 11-min chunk) shows a red
+  **"Token count failed"** — that's just the pre-flight counter; the run itself can
+  still work once the video **"extracting"** step finishes. Uploading the whole
+  33-min file was unreliable, so we **split into ~11-min chunks** (`ffmpeg -f segment
+  -segment_time 00:11:20 -reset_timestamps 1`), one per **fresh chat**, run one at a
+  time (free-tier rate limits). Each chunk's timestamps are local 0:00 — assistant
+  offsets them when stitching (part0=0:00, part1=11:20, part2=22:43).
+
 ## Immediate next step (resume here)
-Run the **lesson-1 pilot** (free): assistant owes the user the **AI Studio prompt**
-(ask for a timestamped transcript + running chart-state/drawing description +
-flagged rules + key-moment timestamps + Hindi marked), writes the **frame-extraction
-script**, and stands up the **repo skeleton + first concept node + concept-map**.
-Do lesson 1 end-to-end, compare Gemini vs Buzz, read the real token cost, then pick
-the route to batch the rest. (Separately parked: the DC-vs-Low-CB modelling
-question — see `CHART_HANDOFF.md` §0 / `RICHROAD_FACTORY`.)
+Finish transcribing lesson 1 in AI Studio (3 chunks → paste each output back,
+assistant stitches + offsets timestamps). Then: extract the flagged key frames →
+`frames/`, write `notes.md`, build the first `concepts/` node + `concept-map.md` +
+`quiz.md`, and do the test-each-other loop. After lesson 1, read the real token
+cost/effort and decide whether to keep the Gemini route or fall back to local Buzz.
+(Separately parked: the DC-vs-Low-CB modelling question — `CHART_HANDOFF.md` §0.)

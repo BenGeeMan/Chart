@@ -154,10 +154,16 @@ nodes, `concept-map.md`, `quiz.md` (answered, 4½/5) and `doubts.md`.
 - **Post-record steps (assistant does these on the machine):** trim black tail
   (`ffmpeg -to <end> -c copy`; find the real end with `blackdetect`), convert MKV→MP4
   for upload (`-c:v copy -c:a aac`), and **split into ~11-min chunks** (see next).
-- **Chunking** (`ffmpeg -f segment -segment_time 00:11:20 -reset_timestamps 1`) is
-  still worth doing — it keeps each transcription run short and restartable. Each
-  chunk's timestamps are local 0:00, so pass the offset (part0=0, part1=680,
-  part2=1363) and they come out lesson-global.
+- **Don't chunk the video.** Splitting lesson 1 into ~11-min pieces was an **AI Studio
+  requirement** (its token-count pre-check failed on the full file) and should have
+  been dropped when we went local — faster-whisper handles full-length files. It costs
+  accuracy: Whisper loses context across a cut, and lesson 1's 22:43 seam duplicated a
+  phrase. **Default = whole file, offset 0.** Only split if losing a long run to a
+  crash would really hurt, and then use ~30-min pieces (offsets 0/1800/3600).
+- **Archiving:** raw MP4s go to Google Drive via rclone (`gdrive:RichRoadCourse/`,
+  `drive.file` scope) using `tools/backup-lesson.sh` — it verifies by checksum before
+  offering to delete the local intermediates. Keep each lesson's **MP4** locally or
+  re-download it when revisiting: later lessons will send us back for more frames.
 
 ## Immediate next step (resume here)
 **Record lesson 2** → `~/Downloads/Course/`, then run the pipeline above (chunk,
